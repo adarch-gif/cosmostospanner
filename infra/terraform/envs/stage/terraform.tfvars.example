@@ -1,0 +1,33 @@
+project_id = "your-gcp-project-id"
+region     = "us-central1"
+
+common_labels = {
+  app         = "cosmos-migration"
+  owner       = "data-platform"
+  environment = "stage"
+}
+
+enable_v1 = true
+enable_v2 = true
+
+v1_create_state_bucket = true
+v1_state_bucket_name   = "your-gcp-project-id-cosmos-v1-stage-state"
+v1_spanner_instance_name    = "cosmos-v1-stage-instance"
+v1_spanner_instance_config  = "regional-us-central1"
+v1_spanner_processing_units = 200
+v1_spanner_database_name    = "cosmos_v1_stage_db"
+v1_spanner_database_ddl = [
+  "CREATE TABLE Users ( user_id STRING(64) NOT NULL, email STRING(256), status STRING(64), created_at TIMESTAMP, profile_json STRING(MAX), migrated_at TIMESTAMP ) PRIMARY KEY (user_id)"
+]
+
+v2_create_state_bucket = true
+v2_state_bucket_name   = "your-gcp-project-id-cosmos-v2-stage-state"
+v2_create_firestore_database = true
+v2_firestore_database_name   = "(default)"
+v2_firestore_location_id     = "us-central"
+v2_spanner_instance_name    = "cosmos-v2-stage-instance"
+v2_spanner_instance_config  = "regional-us-central1"
+v2_spanner_processing_units = 200
+v2_spanner_database_name    = "cosmos_v2_stage_db"
+v2_spanner_database_ddl_additional = []
+

@@ -17,16 +17,29 @@ It now includes a separate **v2 multi-API router** for Cosmos MongoDB API and Ca
 
 All mapping behavior is YAML-driven.
 
-## Documentation index
+## Numbered docs (read in order)
 
-- `docs/ARCHITECTURE.md`: internal design and data flow.
-- `docs/CONFIG_REFERENCE.md`: complete YAML config specification.
-- `docs/RUNBOOK.md`: end-to-end execution runbook (setup to cutover/rollback).
-- `docs/GO_LIVE_CHECKLIST.md`: operational readiness and cutover checklist.
-- `docs/TROUBLESHOOTING.md`: common issues and fixes.
-- `docs/SENIOR_REVIEW.md`: engineering readiness assessment and score.
-- `docs/V2_MULTIAPI_ROUTING.md`: v2 design and runbook for Mongo/Cassandra to Firestore/Spanner routing.
-- `infra/terraform/README.md`: Terraform IaC runbook for reproducible v1/v2 provisioning.
+1. `docs/00_START_HERE.md`
+2. `docs/01_REPO_OVERVIEW.md`
+3. `docs/02_ARCHITECTURE_AND_DATA_FLOW.md`
+4. `docs/03_V1_SQL_API_QUICKSTART.md`
+5. `docs/04_V2_MULTIAPI_ROUTER_QUICKSTART.md`
+6. `docs/05_TERRAFORM_IAC_GUIDE.md`
+7. `docs/06_CONFIG_PARAMETERS_AND_SECRETS.md`
+8. `docs/07_CODEBASE_STRUCTURE.md`
+9. `docs/08_OPERATIONS_AND_SRE.md`
+10. `docs/09_PRODUCTION_READINESS_REVIEW.md`
+
+## Additional deep-dive docs
+
+- `docs/ARCHITECTURE.md`
+- `docs/CONFIG_REFERENCE.md`
+- `docs/RUNBOOK.md`
+- `docs/GO_LIVE_CHECKLIST.md`
+- `docs/TROUBLESHOOTING.md`
+- `docs/SENIOR_REVIEW.md`
+- `docs/V2_MULTIAPI_ROUTING.md`
+- `infra/terraform/README.md`
 
 ## Folder structure
 
@@ -43,6 +56,7 @@ All mapping behavior is YAML-driven.
 - `tests_v2/`: unit tests for v2 router/config/pipeline logic.
 - `.github/workflows/ci.yml`: GitHub Actions workflow running test suite on push/PR.
 - `infra/terraform/`: Terraform module and stack roots for v1 and v2 infrastructure.
+- `infra/terraform/envs/`: environment wrappers (`dev`, `stage`, `prod`) to deploy v1+v2 together.
 
 ## Migration plan (production rollout)
 
