@@ -11,7 +11,42 @@
 
 Use environment wrappers so v1 + v2 are provisioned consistently per environment.
 
-### Example: dev
+### Option A (recommended): bootstrap helper script
+
+Run from repo root:
+
+```powershell
+.\scripts\bootstrap_env.ps1 -Environment dev -Action plan
+```
+
+Common variants:
+
+```powershell
+# Scaffold only (copy backend.tf / terraform.tfvars from *.example)
+.\scripts\bootstrap_env.ps1 -Environment all -Action none -SkipTerraform
+
+# Init + plan for all envs
+.\scripts\bootstrap_env.ps1 -Environment all -Action plan
+
+# Apply for stage with explicit approval bypass
+.\scripts\bootstrap_env.ps1 -Environment stage -Action apply -AutoApprove
+
+# Force overwrite local backend.tf / terraform.tfvars from templates
+.\scripts\bootstrap_env.ps1 -Environment prod -Action init -ForceTemplateCopy
+```
+
+Parameters:
+
+1. `-Environment`: `dev|stage|prod|all` (default: `all`)
+2. `-Action`: `none|init|plan|apply|destroy` (default: `plan`)
+3. `-SkipTerraform`: scaffold templates but do not invoke Terraform
+4. `-ForceTemplateCopy`: overwrite existing `backend.tf` / `terraform.tfvars`
+5. `-AutoApprove`: append `-auto-approve` for `apply` / `destroy`
+6. `-TerraformBinary`: override terraform executable name/path
+
+### Option B: manual commands per environment
+
+#### Example: dev
 
 ```powershell
 cd infra/terraform/envs/dev
@@ -55,4 +90,3 @@ Use one remote state bucket with different prefixes:
 2. Export/apply outputs into app config files.
 3. Ensure runner runtime has ADC auth and correct SA permissions.
 4. Run preflight scripts for v1 and v2.
-

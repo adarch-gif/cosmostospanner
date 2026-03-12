@@ -50,6 +50,7 @@ All mapping behavior is YAML-driven.
 - `scripts/validate.py`: post-load validation runner.
 - `scripts/v2_preflight.py`: v2 source/target readiness checks.
 - `scripts/v2_route_migrate.py`: v2 Mongo/Cassandra size-routed migration runner.
+- `scripts/bootstrap_env.ps1`: env bootstrap + Terraform init/plan/apply/destroy helper.
 - `migration/`: shared modules for config, read, transform, write, and watermark state.
 - `migration_v2/`: v2 source adapters, sinks, router, and pipeline orchestration.
 - `tests/`: unit tests for config parsing, transforms, and retry behavior.
@@ -184,6 +185,15 @@ python .\scripts\v2_route_migrate.py --config .\config\v2.multiapi-routing.yaml
 ```powershell
 python .\scripts\v2_route_migrate.py --config .\config\v2.multiapi-routing.yaml --incremental
 ```
+
+## Terraform quick start (env wrappers)
+
+```powershell
+# From repo root
+.\scripts\bootstrap_env.ps1 -Environment dev -Action plan
+```
+
+See `docs/05_TERRAFORM_IAC_GUIDE.md` for full parameter/flow details.
 
 ## Config highlights
 
