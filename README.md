@@ -26,6 +26,7 @@ All mapping behavior is YAML-driven.
 - `docs/TROUBLESHOOTING.md`: common issues and fixes.
 - `docs/SENIOR_REVIEW.md`: engineering readiness assessment and score.
 - `docs/V2_MULTIAPI_ROUTING.md`: v2 design and runbook for Mongo/Cassandra to Firestore/Spanner routing.
+- `infra/terraform/README.md`: Terraform IaC runbook for reproducible v1/v2 provisioning.
 
 ## Folder structure
 
@@ -41,6 +42,7 @@ All mapping behavior is YAML-driven.
 - `tests/`: unit tests for config parsing, transforms, and retry behavior.
 - `tests_v2/`: unit tests for v2 router/config/pipeline logic.
 - `.github/workflows/ci.yml`: GitHub Actions workflow running test suite on push/PR.
+- `infra/terraform/`: Terraform module and stack roots for v1 and v2 infrastructure.
 
 ## Migration plan (production rollout)
 

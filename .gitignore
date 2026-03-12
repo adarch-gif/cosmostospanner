@@ -10,4 +10,7 @@ venv/
 env/
 state/
 *.log
-
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan

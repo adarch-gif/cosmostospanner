@@ -1,0 +1,21 @@
+project_id = "your-gcp-project-id"
+region     = "us-central1"
+
+labels = {
+  app         = "cosmos-to-spanner"
+  environment = "dev"
+  stack       = "v1-sql-api"
+}
+
+create_state_bucket = true
+state_bucket_name   = "your-gcp-project-id-cosmos-sql-v1-state"
+
+spanner_instance_name   = "cosmos-sql-v1-instance"
+spanner_instance_config = "regional-us-central1"
+spanner_processing_units = 100
+spanner_database_name   = "cosmos_sql_v1_db"
+
+spanner_database_ddl = [
+  "CREATE TABLE Users ( user_id STRING(64) NOT NULL, email STRING(256), status STRING(64), created_at TIMESTAMP, profile_json STRING(MAX), migrated_at TIMESTAMP ) PRIMARY KEY (user_id)"
+]
+
