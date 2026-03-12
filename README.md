@@ -8,6 +8,13 @@ This project provides a configurable migration framework for:
 4. Preflight schema/access checks before migration.
 5. Retry/backoff and dead-letter logging for operational resiliency.
 
+It now includes a separate **v2 multi-API router** for Cosmos MongoDB API and Cassandra API:
+
+- `< 1 MiB` payloads route to Firestore.
+- `>= 1 MiB` payloads route to Spanner.
+- Route registry tracks document destination to support deterministic moves.
+- v2 implementation is isolated from v1 so requirements can evolve independently.
+
 All mapping behavior is YAML-driven.
 
 ## Documentation index
@@ -18,15 +25,21 @@ All mapping behavior is YAML-driven.
 - `docs/GO_LIVE_CHECKLIST.md`: operational readiness and cutover checklist.
 - `docs/TROUBLESHOOTING.md`: common issues and fixes.
 - `docs/SENIOR_REVIEW.md`: engineering readiness assessment and score.
+- `docs/V2_MULTIAPI_ROUTING.md`: v2 design and runbook for Mongo/Cassandra to Firestore/Spanner routing.
 
 ## Folder structure
 
 - `config/migration.example.yaml`: end-to-end config template.
+- `config/v2.multiapi-routing.example.yaml`: v2 multi-API routing config template.
 - `scripts/preflight.py`: source/target readiness checks.
 - `scripts/backfill.py`: backfill and incremental sync runner.
 - `scripts/validate.py`: post-load validation runner.
+- `scripts/v2_preflight.py`: v2 source/target readiness checks.
+- `scripts/v2_route_migrate.py`: v2 Mongo/Cassandra size-routed migration runner.
 - `migration/`: shared modules for config, read, transform, write, and watermark state.
+- `migration_v2/`: v2 source adapters, sinks, router, and pipeline orchestration.
 - `tests/`: unit tests for config parsing, transforms, and retry behavior.
+- `tests_v2/`: unit tests for v2 router/config/pipeline logic.
 - `.github/workflows/ci.yml`: GitHub Actions workflow running test suite on push/PR.
 
 ## Migration plan (production rollout)
@@ -128,6 +141,32 @@ python .\scripts\validate.py --config .\config\migration.yaml --sample-size 200
 
 ```powershell
 python -m pytest -q
+```
+
+## V2 quick start (Mongo/Cassandra with dynamic Firestore/Spanner routing)
+
+1. Copy v2 config template and set values.
+
+```powershell
+Copy-Item .\config\v2.multiapi-routing.example.yaml .\config\v2.multiapi-routing.yaml
+```
+
+2. Run v2 preflight.
+
+```powershell
+python .\scripts\v2_preflight.py --config .\config\v2.multiapi-routing.yaml
+```
+
+3. Run full v2 migration.
+
+```powershell
+python .\scripts\v2_route_migrate.py --config .\config\v2.multiapi-routing.yaml
+```
+
+4. Run incremental v2 migration.
+
+```powershell
+python .\scripts\v2_route_migrate.py --config .\config\v2.multiapi-routing.yaml --incremental
 ```
 
 ## Config highlights

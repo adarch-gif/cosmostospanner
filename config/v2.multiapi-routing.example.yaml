@@ -1,0 +1,63 @@
+runtime:
+  mode: "full" # full | incremental
+  batch_size: 200
+  dry_run: false
+  log_level: "INFO"
+  error_mode: "fail" # fail | skip
+  state_file: "state/v2_watermarks.json"
+  route_registry_file: "state/v2_route_registry.json"
+  dlq_file_path: "state/v2_dead_letter.jsonl"
+  flush_state_each_batch: true
+  retry_attempts: 5
+  retry_initial_delay_seconds: 0.5
+  retry_max_delay_seconds: 15.0
+  retry_backoff_multiplier: 2.0
+  retry_jitter_seconds: 0.25
+  max_records_per_job:
+    mongo_users: 0 # 0 or null means unlimited
+
+routing:
+  firestore_lt_bytes: 1048576 # < 1 MiB => Firestore
+  spanner_max_payload_bytes: 10485760
+  payload_size_overhead_bytes: 2048
+
+targets:
+  firestore:
+    project: "gcp-project-id"
+    database: "(default)"
+    collection: "cosmos_router_v2"
+  spanner:
+    project: "gcp-project-id"
+    instance: "spanner-instance-id"
+    database: "spanner-db-name"
+    table: "RoutedDocuments"
+
+jobs:
+  - name: "mongo_users"
+    api: "mongodb"
+    enabled: true
+    connection_string_env: "COSMOS_MONGO_CONNECTION_STRING"
+    database: "appdb"
+    collection: "users"
+    route_namespace: "mongodb.appdb.users"
+    key_fields: ["id"]
+    source_query: "{}"
+    incremental_field: "_ts"
+    page_size: 500
+
+  - name: "cassandra_orders"
+    api: "cassandra"
+    enabled: false
+    contact_points:
+      - "cassandra-account.cassandra.cosmos.azure.com"
+    port: 10350
+    username_env: "COSMOS_CASSANDRA_USERNAME"
+    password_env: "COSMOS_CASSANDRA_PASSWORD"
+    keyspace: "appks"
+    table: "orders"
+    route_namespace: "cassandra.appks.orders"
+    key_fields: ["order_id"]
+    source_query: "SELECT * FROM orders"
+    incremental_field: "updated_at"
+    page_size: 500
+
