@@ -1,0 +1,51 @@
+source:
+  endpoint: "https://<cosmos-account>.documents.azure.com:443/"
+  key_env: "COSMOS_KEY"
+  database: "app_db"
+
+target:
+  project: "gcp-project-id"
+  instance: "spanner-instance-id"
+  database: "spanner-db-name"
+
+runtime:
+  batch_size: 500
+  query_page_size: 200
+  dry_run: false
+  log_level: "INFO"
+  watermark_state_file: "state/watermarks.json"
+  watermark_overlap_seconds: 5
+  error_mode: "fail" # fail | skip
+  max_docs_per_container:
+    users: 0 # 0 or null means unlimited
+
+mappings:
+  - source_container: "users"
+    target_table: "Users"
+    key_columns: ["user_id"]
+    mode: "upsert" # upsert | insert | update | replace
+    source_query: "SELECT * FROM c"
+    incremental_query: "SELECT * FROM c WHERE c._ts > @last_ts"
+    columns:
+      - target: "user_id"
+        source: "id"
+        converter: "string"
+        required: true
+      - target: "email"
+        source: "profile.email"
+        converter: "string"
+      - target: "status"
+        source: "profile.status"
+        converter: "string"
+        default: "active"
+      - target: "created_at"
+        source: "createdAt"
+        converter: "timestamp"
+      - target: "profile_json"
+        source: "profile"
+        converter: "json_string"
+    static_columns:
+      migrated_at: "__NOW_UTC__"
+    delete_rule:
+      field: "isDeleted"
+      equals: true
