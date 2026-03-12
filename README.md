@@ -8,6 +8,14 @@ This project provides a configurable migration framework for:
 
 All mapping behavior is YAML-driven.
 
+## Documentation index
+
+- `docs/ARCHITECTURE.md`: internal design and data flow.
+- `docs/CONFIG_REFERENCE.md`: complete YAML config specification.
+- `docs/RUNBOOK.md`: end-to-end execution runbook (setup to cutover/rollback).
+- `docs/TROUBLESHOOTING.md`: common issues and fixes.
+- `docs/SENIOR_REVIEW.md`: engineering readiness assessment and score.
+
 ## Folder structure
 
 - `config/migration.example.yaml`: end-to-end config template.
@@ -122,3 +130,9 @@ python .\scripts\validate.py --config .\config\migration.yaml --sample-size 200
 - Use orchestration (Cloud Run Jobs, Airflow, or GitHub Actions) for scheduling.
 - Add canary validations on critical entities before each environment cutover.
 
+## Current implementation limits
+
+- No built-in retry/backoff yet for transient network/service failures.
+- No dead-letter queue for skipped records.
+- Validation focuses on counts/key-existence, not full row value checksums.
+- Watermark file is local state and should not be shared by concurrent writers.

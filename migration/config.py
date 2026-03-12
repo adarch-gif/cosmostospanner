@@ -77,6 +77,21 @@ def _require(raw: dict[str, Any], key: str) -> Any:
     return value
 
 
+def _parse_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "y"}:
+        return True
+    if text in {"false", "0", "no", "n"}:
+        return False
+    raise ValueError(f"Cannot parse boolean value: {value!r}")
+
+
 def _parse_column_rules(raw_columns: Any) -> list[ColumnRule]:
     rules: list[ColumnRule] = []
     if isinstance(raw_columns, list):
@@ -87,9 +102,10 @@ def _parse_column_rules(raw_columns: Any) -> list[ColumnRule]:
                     source=entry.get("source"),
                     converter=entry.get("converter", "identity"),
                     default=entry.get("default"),
-                    required=bool(entry.get("required", False)),
+                    required=_parse_bool(entry.get("required", False), default=False),
                 )
             )
+        _validate_column_targets(rules)
         return rules
 
     if isinstance(raw_columns, dict):
@@ -103,14 +119,23 @@ def _parse_column_rules(raw_columns: Any) -> list[ColumnRule]:
                         source=value.get("source"),
                         converter=value.get("converter", "identity"),
                         default=value.get("default"),
-                        required=bool(value.get("required", False)),
+                        required=_parse_bool(value.get("required", False), default=False),
                     )
                 )
             else:
                 raise ValueError(f"Unsupported column mapping for {target}: {value!r}")
+        _validate_column_targets(rules)
         return rules
 
     raise ValueError("`columns` must be a list or dictionary.")
+
+
+def _validate_column_targets(rules: list[ColumnRule]) -> None:
+    seen: set[str] = set()
+    for rule in rules:
+        if rule.target in seen:
+            raise ValueError(f"Duplicate target column in mapping: {rule.target}")
+        seen.add(rule.target)
 
 
 def _parse_mapping(raw: dict[str, Any]) -> TableMapping:
@@ -122,15 +147,29 @@ def _parse_mapping(raw: dict[str, Any]) -> TableMapping:
             equals=delete_rule_raw.get("equals", True),
         )
 
+    key_columns_raw = _require(raw, "key_columns")
+    if not isinstance(key_columns_raw, list) or not key_columns_raw:
+        raise ValueError(
+            f"Mapping {_require(raw, 'source_container')}->{_require(raw, 'target_table')} "
+            "`key_columns` must be a non-empty list."
+        )
+    if any(not isinstance(item, str) or not item for item in key_columns_raw):
+        raise ValueError(
+            f"Mapping {_require(raw, 'source_container')}->{_require(raw, 'target_table')} "
+            "`key_columns` must contain non-empty strings."
+        )
+
+    columns = _parse_column_rules(_require(raw, "columns"))
+    static_columns = dict(raw.get("static_columns", {}))
     mapping = TableMapping(
         source_container=_require(raw, "source_container"),
         target_table=_require(raw, "target_table"),
-        key_columns=list(_require(raw, "key_columns")),
-        columns=_parse_column_rules(_require(raw, "columns")),
+        key_columns=list(key_columns_raw),
+        columns=columns,
         mode=str(raw.get("mode", "upsert")).lower(),
         source_query=raw.get("source_query", "SELECT * FROM c"),
         incremental_query=raw.get("incremental_query"),
-        static_columns=dict(raw.get("static_columns", {})),
+        static_columns=static_columns,
         delete_rule=delete_rule,
     )
     if mapping.delete_rule and not mapping.key_columns:
@@ -142,6 +181,15 @@ def _parse_mapping(raw: dict[str, Any]) -> TableMapping:
         raise ValueError(
             f"Mapping mode {mapping.mode!r} is invalid for "
             f"{mapping.source_container}->{mapping.target_table}."
+        )
+
+    available_targets = {rule.target for rule in mapping.columns}
+    available_targets.update(mapping.static_columns.keys())
+    missing_key_targets = [k for k in mapping.key_columns if k not in available_targets]
+    if missing_key_targets:
+        raise ValueError(
+            f"Key columns {missing_key_targets} are not produced by columns/static_columns "
+            f"in mapping {mapping.source_container}->{mapping.target_table}."
         )
     return mapping
 
@@ -191,7 +239,7 @@ def load_config(path: str | Path) -> MigrationConfig:
     runtime = RuntimeConfig(
         batch_size=int(runtime_raw.get("batch_size", 500)),
         query_page_size=int(runtime_raw.get("query_page_size", 200)),
-        dry_run=bool(runtime_raw.get("dry_run", False)),
+        dry_run=_parse_bool(runtime_raw.get("dry_run", False), default=False),
         log_level=str(runtime_raw.get("log_level", "INFO")),
         watermark_state_file=str(
             runtime_raw.get("watermark_state_file", "state/watermarks.json")
@@ -203,6 +251,12 @@ def load_config(path: str | Path) -> MigrationConfig:
 
     if runtime.error_mode not in {"fail", "skip"}:
         raise ValueError("runtime.error_mode must be one of: fail, skip")
+    if runtime.batch_size <= 0:
+        raise ValueError("runtime.batch_size must be > 0")
+    if runtime.query_page_size <= 0:
+        raise ValueError("runtime.query_page_size must be > 0")
+    if runtime.watermark_overlap_seconds < 0:
+        raise ValueError("runtime.watermark_overlap_seconds must be >= 0")
 
     mappings_raw = raw.get("mappings", [])
     if not mappings_raw:
