@@ -8,18 +8,23 @@ The code supports:
 
 - Full backfill.
 - Watermark-based incremental sync.
-- Basic reconciliation validation.
+- Preflight source/target checks.
+- Reconciliation validation (counts + key existence + sample value checks).
+- Retry/backoff and dead-letter handling.
 
 ## High-level design
 
 The project is intentionally simple and script-driven:
 
+- `scripts/preflight.py`: validates target schema and source accessibility before migration.
 - `scripts/backfill.py`: orchestrates read -> transform -> write.
 - `scripts/validate.py`: compares expected source rows to target rows and checks sampled keys.
 - `migration/config.py`: loads and validates YAML config.
 - `migration/cosmos_reader.py`: reads documents from Cosmos containers.
 - `migration/transform.py`: maps source fields to target columns and applies converters.
 - `migration/spanner_writer.py`: writes upserts/deletes and performs validation reads in Spanner.
+- `migration/retry_utils.py`: bounded exponential backoff with jitter.
+- `migration/dead_letter.py`: dead-letter JSONL sink for skipped/failed records.
 - `migration/state_store.py`: stores per-container watermark state (`_ts`) for incremental runs.
 
 ## Data flow
@@ -31,7 +36,8 @@ The project is intentionally simple and script-driven:
 3. Transform each document to a Spanner row.
 4. Buffer rows and write in batches (`batch_size`).
 5. Optionally map tombstone docs to delete operations.
-6. Emit counters and completion summary.
+6. On batch write failure in skip mode, fallback to row-level writes/deletes and emit DLQ entries.
+7. Emit counters and completion summary.
 
 ### Incremental flow
 
@@ -39,6 +45,7 @@ The project is intentionally simple and script-driven:
 2. Execute `incremental_query` (default: `_ts > @last_ts` with overlap window).
 3. Upsert/delete transformed rows in batches.
 4. Track `max_ts_seen` and persist new watermark when mapping completes.
+5. Optionally flush watermark state after each mapping.
 
 ## Idempotency model
 
@@ -60,6 +67,7 @@ The project is intentionally simple and script-driven:
   - `runtime.batch_size`
   - mapping-specific `runtime.max_docs_per_container`
 - Scale-out is expected through orchestration (multiple jobs, sharded mappings, or time-based partitioning).
+- Transient errors are retried based on runtime retry policy.
 
 ## Security model
 
@@ -67,11 +75,10 @@ The project is intentionally simple and script-driven:
 - Cosmos key should be supplied via `source.key_env`.
 - GCP auth relies on Application Default Credentials.
 - Watermark state file is local and should be protected with least privilege.
+- Dead-letter file can contain source records; protect access similarly to production data.
 
 ## Limitations to understand before production
 
-- No built-in retry/backoff policy yet for transient service/network failures.
-- No built-in dead-letter queue for permanently failed records.
 - No distributed lock around watermark file for concurrent writers.
-- Validation is structural (counts + key existence), not full value checksum parity.
-
+- Validation is sampled (counts + key existence + sampled values), not full value checksum parity.
+- Incremental mode is watermark polling, not true cross-cloud CDC stream replication.

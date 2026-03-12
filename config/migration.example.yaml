@@ -15,7 +15,14 @@ runtime:
   log_level: "INFO"
   watermark_state_file: "state/watermarks.json"
   watermark_overlap_seconds: 5
+  flush_watermark_each_mapping: true
   error_mode: "fail" # fail | skip
+  dlq_file_path: "state/dead_letter.jsonl"
+  retry_attempts: 5
+  retry_initial_delay_seconds: 0.5
+  retry_max_delay_seconds: 15.0
+  retry_backoff_multiplier: 2.0
+  retry_jitter_seconds: 0.25
   max_docs_per_container:
     users: 0 # 0 or null means unlimited
 
@@ -46,6 +53,11 @@ mappings:
         converter: "json_string"
     static_columns:
       migrated_at: "__NOW_UTC__"
+    validation_columns:
+      - "email"
+      - "status"
+      - "created_at"
+      - "profile_json"
     delete_rule:
       field: "isDeleted"
       equals: true

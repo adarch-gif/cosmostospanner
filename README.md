@@ -4,7 +4,9 @@ This project provides a configurable migration framework for:
 
 1. One-time bulk backfill from Azure Cosmos DB to Google Cloud Spanner.
 2. Watermark-based incremental sync (using Cosmos `_ts`).
-3. Validation checks (row counts + sample key existence).
+3. Validation checks (counts, key existence, and sample value-level comparison).
+4. Preflight schema/access checks before migration.
+5. Retry/backoff and dead-letter logging for operational resiliency.
 
 All mapping behavior is YAML-driven.
 
@@ -13,15 +15,19 @@ All mapping behavior is YAML-driven.
 - `docs/ARCHITECTURE.md`: internal design and data flow.
 - `docs/CONFIG_REFERENCE.md`: complete YAML config specification.
 - `docs/RUNBOOK.md`: end-to-end execution runbook (setup to cutover/rollback).
+- `docs/GO_LIVE_CHECKLIST.md`: operational readiness and cutover checklist.
 - `docs/TROUBLESHOOTING.md`: common issues and fixes.
 - `docs/SENIOR_REVIEW.md`: engineering readiness assessment and score.
 
 ## Folder structure
 
 - `config/migration.example.yaml`: end-to-end config template.
+- `scripts/preflight.py`: source/target readiness checks.
 - `scripts/backfill.py`: backfill and incremental sync runner.
 - `scripts/validate.py`: post-load validation runner.
 - `migration/`: shared modules for config, read, transform, write, and watermark state.
+- `tests/`: unit tests for config parsing, transforms, and retry behavior.
+- `.github/workflows/ci.yml`: GitHub Actions workflow running test suite on push/PR.
 
 ## Migration plan (production rollout)
 
@@ -94,22 +100,34 @@ $env:COSMOS_KEY = "<cosmos-primary-key>"
 python .\scripts\backfill.py --config .\config\migration.yaml --dry-run
 ```
 
-4. Full backfill.
+4. Preflight (recommended before first write).
+
+```powershell
+python .\scripts\preflight.py --config .\config\migration.yaml
+```
+
+5. Full backfill.
 
 ```powershell
 python .\scripts\backfill.py --config .\config\migration.yaml
 ```
 
-5. Incremental sync.
+6. Incremental sync.
 
 ```powershell
 python .\scripts\backfill.py --config .\config\migration.yaml --incremental
 ```
 
-6. Validate.
+7. Validate (includes value comparison by default).
 
 ```powershell
 python .\scripts\validate.py --config .\config\migration.yaml --sample-size 200
+```
+
+8. Run tests.
+
+```powershell
+python -m pytest -q
 ```
 
 ## Config highlights
@@ -121,18 +139,19 @@ python .\scripts\validate.py --config .\config\migration.yaml --sample-size 200
 - `mode`: `upsert`, `insert`, `update`, or `replace`.
 - `delete_rule`: optional tombstone mapping.
 - `incremental_query`: defaults to `_ts > @last_ts` if omitted.
+- `validation_columns`: optional explicit column list for value-level validation.
+- `retry_*`: retry policy for Cosmos and Spanner operations.
+- `dlq_file_path`: JSONL file path for skipped/failed records.
 
 ## Recommended production extensions
 
-- Add retry/backoff around Cosmos and Spanner calls.
-- Add dead-letter logging for failed documents.
 - Add audit table for per-batch checksums and run IDs.
 - Use orchestration (Cloud Run Jobs, Airflow, or GitHub Actions) for scheduling.
 - Add canary validations on critical entities before each environment cutover.
+- Add integration tests against ephemeral Cosmos/Spanner test environments.
 
 ## Current implementation limits
 
-- No built-in retry/backoff yet for transient network/service failures.
-- No dead-letter queue for skipped records.
-- Validation focuses on counts/key-existence, not full row value checksums.
+- Incremental replication is watermark-based, not full CDC/change-stream semantics.
+- Validation is sampled value comparison, not full dataset checksum parity.
 - Watermark file is local state and should not be shared by concurrent writers.

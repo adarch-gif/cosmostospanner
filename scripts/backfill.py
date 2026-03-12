@@ -12,7 +12,9 @@ if str(ROOT) not in sys.path:
 
 from migration.config import MigrationConfig, TableMapping, load_config
 from migration.cosmos_reader import CosmosReader
+from migration.dead_letter import DeadLetterSink
 from migration.logging_utils import configure_logging
+from migration.retry_utils import RetryPolicy
 from migration.spanner_writer import SpannerWriter
 from migration.state_store import WatermarkStore
 from migration.transform import TransformOutput, transform_document
@@ -77,11 +79,43 @@ def _flush_upserts(
     mapping: TableMapping,
     buffer: list[dict[str, Any]],
     counters: dict[str, int],
+    *,
+    error_mode: str,
+    dead_letter: DeadLetterSink,
 ) -> None:
     if not buffer:
         return
-    counters["rows_upserted"] += writer.write_rows(mapping.target_table, buffer, mapping.mode)
-    buffer.clear()
+    try:
+        counters["rows_upserted"] += writer.write_rows(mapping.target_table, buffer, mapping.mode)
+        return
+    except Exception as exc:  # noqa: BLE001
+        if error_mode != "skip":
+            raise
+        LOGGER.warning(
+            "Batch upsert failed for %s -> %s; falling back to row writes: %s",
+            mapping.source_container,
+            mapping.target_table,
+            exc,
+        )
+        for row in buffer:
+            try:
+                counters["rows_upserted"] += writer.write_rows(
+                    mapping.target_table,
+                    [row],
+                    mapping.mode,
+                )
+            except Exception as row_exc:  # noqa: BLE001
+                counters["rows_failed"] += 1
+                dead_letter.write(
+                    stage="write_upsert",
+                    mapping_name=f"{mapping.source_container}->{mapping.target_table}",
+                    source_container=mapping.source_container,
+                    target_table=mapping.target_table,
+                    error=row_exc,
+                    transformed_row=row,
+                )
+    finally:
+        buffer.clear()
 
 
 def _flush_deletes(
@@ -89,11 +123,43 @@ def _flush_deletes(
     mapping: TableMapping,
     buffer: list[dict[str, Any]],
     counters: dict[str, int],
+    *,
+    error_mode: str,
+    dead_letter: DeadLetterSink,
 ) -> None:
     if not buffer:
         return
-    counters["rows_deleted"] += writer.delete_rows(mapping.target_table, mapping.key_columns, buffer)
-    buffer.clear()
+    try:
+        counters["rows_deleted"] += writer.delete_rows(mapping.target_table, mapping.key_columns, buffer)
+        return
+    except Exception as exc:  # noqa: BLE001
+        if error_mode != "skip":
+            raise
+        LOGGER.warning(
+            "Batch delete failed for %s -> %s; falling back to key deletes: %s",
+            mapping.source_container,
+            mapping.target_table,
+            exc,
+        )
+        for key_row in buffer:
+            try:
+                counters["rows_deleted"] += writer.delete_rows(
+                    mapping.target_table,
+                    mapping.key_columns,
+                    [key_row],
+                )
+            except Exception as row_exc:  # noqa: BLE001
+                counters["rows_failed"] += 1
+                dead_letter.write(
+                    stage="delete",
+                    mapping_name=f"{mapping.source_container}->{mapping.target_table}",
+                    source_container=mapping.source_container,
+                    target_table=mapping.target_table,
+                    error=row_exc,
+                    transformed_row=key_row,
+                )
+    finally:
+        buffer.clear()
 
 
 def _process_mapping(
@@ -102,6 +168,7 @@ def _process_mapping(
     reader: CosmosReader,
     writer: SpannerWriter,
     watermarks: WatermarkStore,
+    dead_letter: DeadLetterSink,
     incremental: bool,
     since_ts: int | None,
 ) -> dict[str, int]:
@@ -109,6 +176,7 @@ def _process_mapping(
         "docs_seen": 0,
         "rows_upserted": 0,
         "rows_deleted": 0,
+        "rows_failed": 0,
         "docs_failed": 0,
         "max_ts_seen": 0,
     }
@@ -146,6 +214,14 @@ def _process_mapping(
         except Exception as exc:  # noqa: BLE001
             counters["docs_failed"] += 1
             if config.runtime.error_mode == "skip":
+                dead_letter.write(
+                    stage="transform",
+                    mapping_name=f"{mapping.source_container}->{mapping.target_table}",
+                    source_container=mapping.source_container,
+                    target_table=mapping.target_table,
+                    error=exc,
+                    source_document=document,
+                )
                 LOGGER.warning(
                     "Skipping doc due to transform error in %s: %s",
                     mapping.source_container,
@@ -158,17 +234,47 @@ def _process_mapping(
         if result.is_delete:
             delete_buffer.append(result.row)
             if len(delete_buffer) >= config.runtime.batch_size:
-                _flush_deletes(writer, mapping, delete_buffer, counters)
+                _flush_deletes(
+                    writer,
+                    mapping,
+                    delete_buffer,
+                    counters,
+                    error_mode=config.runtime.error_mode,
+                    dead_letter=dead_letter,
+                )
         else:
             upsert_buffer.append(result.row)
             if len(upsert_buffer) >= config.runtime.batch_size:
-                _flush_upserts(writer, mapping, upsert_buffer, counters)
+                _flush_upserts(
+                    writer,
+                    mapping,
+                    upsert_buffer,
+                    counters,
+                    error_mode=config.runtime.error_mode,
+                    dead_letter=dead_letter,
+                )
 
-    _flush_upserts(writer, mapping, upsert_buffer, counters)
-    _flush_deletes(writer, mapping, delete_buffer, counters)
+    _flush_upserts(
+        writer,
+        mapping,
+        upsert_buffer,
+        counters,
+        error_mode=config.runtime.error_mode,
+        dead_letter=dead_letter,
+    )
+    _flush_deletes(
+        writer,
+        mapping,
+        delete_buffer,
+        counters,
+        error_mode=config.runtime.error_mode,
+        dead_letter=dead_letter,
+    )
 
     if incremental and counters["max_ts_seen"] > 0:
         watermarks.set(mapping.source_container, counters["max_ts_seen"])
+        if config.runtime.flush_watermark_each_mapping:
+            watermarks.flush()
     return counters
 
 
@@ -184,9 +290,11 @@ def main() -> int:
         LOGGER.error("No mappings selected. Check --container filters.")
         return 1
 
-    reader = CosmosReader(config.source)
-    writer = SpannerWriter(config.target, dry_run=config.runtime.dry_run)
+    retry_policy = RetryPolicy.from_runtime(config.runtime)
+    reader = CosmosReader(config.source, retry_policy=retry_policy)
+    writer = SpannerWriter(config.target, retry_policy=retry_policy, dry_run=config.runtime.dry_run)
     watermark_store = WatermarkStore(config.runtime.watermark_state_file)
+    dead_letter = DeadLetterSink(config.runtime.dlq_file_path)
 
     exit_code = 0
     for mapping in mappings:
@@ -197,16 +305,18 @@ def main() -> int:
                 reader=reader,
                 writer=writer,
                 watermarks=watermark_store,
+                dead_letter=dead_letter,
                 incremental=args.incremental,
                 since_ts=args.since_ts,
             )
             LOGGER.info(
-                "Completed %s -> %s | docs_seen=%s upserted=%s deleted=%s failed=%s max_ts=%s",
+                "Completed %s -> %s | docs_seen=%s upserted=%s deleted=%s row_failures=%s doc_failures=%s max_ts=%s",
                 mapping.source_container,
                 mapping.target_table,
                 stats["docs_seen"],
                 stats["rows_upserted"],
                 stats["rows_deleted"],
+                stats["rows_failed"],
                 stats["docs_failed"],
                 stats["max_ts_seen"],
             )
@@ -228,4 +338,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

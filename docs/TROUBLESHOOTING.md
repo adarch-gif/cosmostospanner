@@ -32,6 +32,17 @@ Fix:
 
 - Confirm exact container names in config.
 
+### Preflight schema failure (`Target table does not exist` / `missing columns`)
+
+Cause:
+
+- Spanner DDL does not match mapping.
+
+Fix:
+
+- Create missing table/columns and rerun:
+  - `python .\scripts\preflight.py --config .\config\migration.yaml`
+
 ## Configuration validation errors
 
 ### `key_columns must be a non-empty list`
@@ -131,6 +142,17 @@ Fix:
 
 - Expected behavior with `upsert`; reduce overlap if safe.
 
+### DLQ file grows rapidly
+
+Cause:
+
+- Frequent transform or write errors while `error_mode=skip`.
+
+Fix:
+
+- Inspect `runtime.dlq_file_path` JSONL entries for root causes.
+- Correct mapping/type issues and rerun targeted container backfill.
+
 ## Validation failures
 
 ### Count delta is not zero
@@ -160,4 +182,3 @@ Fix:
 - Re-run targeted backfill for affected mapping.
 - Verify key column transform output.
 - Inspect logs for write exceptions.
-

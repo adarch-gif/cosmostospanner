@@ -36,7 +36,14 @@ Validation rule:
 - `log_level` (default `INFO`): `DEBUG`, `INFO`, `WARNING`, `ERROR`.
 - `watermark_state_file` (default `state/watermarks.json`): local watermark JSON file path.
 - `watermark_overlap_seconds` (default `5`, must be `>= 0`): overlap window for incremental reads.
+- `flush_watermark_each_mapping` (default `true`): flush watermark file after each mapping in incremental mode.
 - `error_mode` (default `fail`): `fail` or `skip`.
+- `dlq_file_path` (default `state/dead_letter.jsonl`): dead-letter JSONL output path.
+- `retry_attempts` (default `5`, must be `>= 1`): max retry attempts for retriable I/O operations.
+- `retry_initial_delay_seconds` (default `0.5`, must be `>= 0`): first retry delay.
+- `retry_max_delay_seconds` (default `15.0`, must be `>= 0`): max delay cap.
+- `retry_backoff_multiplier` (default `2.0`, must be `>= 1`): exponential backoff multiplier.
+- `retry_jitter_seconds` (default `0.25`, must be `>= 0`): random jitter added to retry delay.
 - `max_docs_per_container` (optional): dictionary of container limit overrides.
   - `0` or `null` means unlimited.
 
@@ -54,6 +61,8 @@ Each mapping defines one Cosmos container to one Spanner table migration.
   - If omitted, default is `SELECT * FROM c WHERE c._ts > @last_ts`.
 - `static_columns` (optional): constant or marker values set on every row.
 - `delete_rule` (optional): converts matching documents into delete operations.
+- `validation_columns` (optional): explicit column list for value comparison in validation.
+  - If omitted, validation compares columns from `columns` mapping rules.
 
 Validation rules:
 
@@ -63,6 +72,7 @@ Validation rules:
 - Every `key_columns` entry must be produced by either:
   - a `columns[].target`, or
   - a `static_columns` key.
+- `validation_columns` must be unique and must exist in mapped output columns.
 
 ## `columns` formats
 
@@ -145,8 +155,10 @@ mappings:
         converter: "timestamp"
     static_columns:
       migrated_at: "__NOW_UTC__"
+    validation_columns:
+      - "email"
+      - "created_at"
     delete_rule:
       field: "isDeleted"
       equals: true
 ```
-

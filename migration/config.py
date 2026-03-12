@@ -30,7 +30,14 @@ class RuntimeConfig:
     log_level: str = "INFO"
     watermark_state_file: str = "state/watermarks.json"
     watermark_overlap_seconds: int = 5
+    flush_watermark_each_mapping: bool = True
     error_mode: str = "fail"  # fail | skip
+    dlq_file_path: str = "state/dead_letter.jsonl"
+    retry_attempts: int = 5
+    retry_initial_delay_seconds: float = 0.5
+    retry_max_delay_seconds: float = 15.0
+    retry_backoff_multiplier: float = 2.0
+    retry_jitter_seconds: float = 0.25
     max_docs_per_container: dict[str, int | None] = field(default_factory=dict)
 
 
@@ -60,6 +67,7 @@ class TableMapping:
     incremental_query: str | None = None
     static_columns: dict[str, Any] = field(default_factory=dict)
     delete_rule: DeleteRule | None = None
+    validation_columns: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -90,6 +98,19 @@ def _parse_bool(value: Any, default: bool = False) -> bool:
     if text in {"false", "0", "no", "n"}:
         return False
     raise ValueError(f"Cannot parse boolean value: {value!r}")
+
+
+def _parse_string_list(value: Any, field_name: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{field_name} must be a list of strings.")
+    parsed: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item:
+            raise ValueError(f"{field_name} must contain non-empty strings.")
+        parsed.append(item)
+    return parsed
 
 
 def _parse_column_rules(raw_columns: Any) -> list[ColumnRule]:
@@ -161,6 +182,7 @@ def _parse_mapping(raw: dict[str, Any]) -> TableMapping:
 
     columns = _parse_column_rules(_require(raw, "columns"))
     static_columns = dict(raw.get("static_columns", {}))
+    validation_columns = _parse_string_list(raw.get("validation_columns"), "validation_columns")
     mapping = TableMapping(
         source_container=_require(raw, "source_container"),
         target_table=_require(raw, "target_table"),
@@ -171,6 +193,7 @@ def _parse_mapping(raw: dict[str, Any]) -> TableMapping:
         incremental_query=raw.get("incremental_query"),
         static_columns=static_columns,
         delete_rule=delete_rule,
+        validation_columns=validation_columns,
     )
     if mapping.delete_rule and not mapping.key_columns:
         raise ValueError(
@@ -189,6 +212,19 @@ def _parse_mapping(raw: dict[str, Any]) -> TableMapping:
     if missing_key_targets:
         raise ValueError(
             f"Key columns {missing_key_targets} are not produced by columns/static_columns "
+            f"in mapping {mapping.source_container}->{mapping.target_table}."
+        )
+    if len(mapping.validation_columns) != len(set(mapping.validation_columns)):
+        raise ValueError(
+            f"validation_columns has duplicates in mapping "
+            f"{mapping.source_container}->{mapping.target_table}."
+        )
+    invalid_validation_columns = [
+        col for col in mapping.validation_columns if col not in available_targets
+    ]
+    if invalid_validation_columns:
+        raise ValueError(
+            f"validation_columns {invalid_validation_columns} are not mapped output columns "
             f"in mapping {mapping.source_container}->{mapping.target_table}."
         )
     return mapping
@@ -245,7 +281,18 @@ def load_config(path: str | Path) -> MigrationConfig:
             runtime_raw.get("watermark_state_file", "state/watermarks.json")
         ),
         watermark_overlap_seconds=int(runtime_raw.get("watermark_overlap_seconds", 5)),
+        flush_watermark_each_mapping=_parse_bool(
+            runtime_raw.get("flush_watermark_each_mapping", True), default=True
+        ),
         error_mode=str(runtime_raw.get("error_mode", "fail")).lower(),
+        dlq_file_path=str(runtime_raw.get("dlq_file_path", "state/dead_letter.jsonl")),
+        retry_attempts=int(runtime_raw.get("retry_attempts", 5)),
+        retry_initial_delay_seconds=float(
+            runtime_raw.get("retry_initial_delay_seconds", 0.5)
+        ),
+        retry_max_delay_seconds=float(runtime_raw.get("retry_max_delay_seconds", 15.0)),
+        retry_backoff_multiplier=float(runtime_raw.get("retry_backoff_multiplier", 2.0)),
+        retry_jitter_seconds=float(runtime_raw.get("retry_jitter_seconds", 0.25)),
         max_docs_per_container=parsed_max_docs,
     )
 
@@ -257,6 +304,16 @@ def load_config(path: str | Path) -> MigrationConfig:
         raise ValueError("runtime.query_page_size must be > 0")
     if runtime.watermark_overlap_seconds < 0:
         raise ValueError("runtime.watermark_overlap_seconds must be >= 0")
+    if runtime.retry_attempts < 1:
+        raise ValueError("runtime.retry_attempts must be >= 1")
+    if runtime.retry_initial_delay_seconds < 0:
+        raise ValueError("runtime.retry_initial_delay_seconds must be >= 0")
+    if runtime.retry_max_delay_seconds < 0:
+        raise ValueError("runtime.retry_max_delay_seconds must be >= 0")
+    if runtime.retry_backoff_multiplier < 1:
+        raise ValueError("runtime.retry_backoff_multiplier must be >= 1")
+    if runtime.retry_jitter_seconds < 0:
+        raise ValueError("runtime.retry_jitter_seconds must be >= 0")
 
     mappings_raw = raw.get("mappings", [])
     if not mappings_raw:

@@ -64,6 +64,13 @@ Before migration, ensure Spanner tables/indexes exist and match mapping output:
 - Confirm network path to Cosmos and Spanner.
 - Confirm Spanner write quota and expected throughput.
 - Confirm `watermark_state_file` path is writable.
+- Confirm `dlq_file_path` path is writable.
+
+Run automated preflight checks:
+
+```powershell
+python .\scripts\preflight.py --config .\config\migration.yaml
+```
 
 ## 6. Dry-run
 
@@ -99,8 +106,8 @@ python .\scripts\validate.py --config .\config\migration.yaml --sample-size 200
 
 Interpretation:
 
-- `count_delta = 0` and `sample_missing = 0` means basic parity passed.
-- Non-zero deltas require investigation before cutover.
+- `count_delta = 0`, `sample_missing = 0`, and `sample_value_mismatch_rows = 0` indicates strong sample parity.
+- Non-zero deltas/mismatches require investigation before cutover.
 
 ## 9. Incremental catch-up
 
@@ -157,6 +164,7 @@ Track these for each run:
 - Rows written/sec to Spanner.
 - Batch commit latency.
 - Failed docs count and top exception classes.
+- DLQ event count and top `stage`/`error_type`.
 - Watermark progression by container.
 - Validation delta trends.
 
@@ -166,5 +174,4 @@ Track these for each run:
 - Keep config under version control.
 - Treat watermark file as operational state (backup it).
 - Prefer `upsert` mode for rerunnable migrations.
-- Use `error_mode=fail` in production unless you have DLQ handling.
-
+- Use `error_mode=fail` in production for first run, then `skip` with DLQ if required for continuity.
