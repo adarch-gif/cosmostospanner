@@ -36,8 +36,10 @@
    - `spanner_sink.py`
 5. `migration_v2/pipeline.py`: orchestration + route moves + checkpoint safety
 6. `migration_v2/state_store.py`: watermarks + route registry
-7. `scripts/v2_preflight.py`
-8. `scripts/v2_route_migrate.py`
+7. `migration_v2/reconciliation.py`: exact routed validation across source, registry, and sinks
+8. `scripts/v2_preflight.py`
+9. `scripts/v2_route_migrate.py`
+10. `scripts/v2_validate.py`
 
 ## 4. Shared operational modules
 
@@ -54,3 +56,5 @@
 5. v2 route-move logic
 6. Incremental checkpoint behavior
 7. State backend round-trips for local and `gs://` paths
+8. v2 routed reconciliation and manifest-backed distributed execution
+9. control-plane coordination, stage release gates, and stale-shard recovery

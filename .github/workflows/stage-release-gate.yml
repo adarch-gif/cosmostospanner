@@ -1,0 +1,82 @@
+name: stage-release-gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      gate_scope:
+        description: Shared release-gate scope/campaign id
+        required: true
+        type: string
+      run_v1:
+        description: Run v1 stage gate
+        required: true
+        default: true
+        type: boolean
+      run_v2:
+        description: Run v2 stage gate
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  release-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Validate release-gate secrets
+        shell: bash
+        env:
+          STAGE_RELEASE_GATE_FILE: ${{ secrets.STAGE_RELEASE_GATE_FILE }}
+          STAGE_V1_CONFIG_YAML: ${{ secrets.STAGE_V1_CONFIG_YAML }}
+          STAGE_V2_CONFIG_YAML: ${{ secrets.STAGE_V2_CONFIG_YAML }}
+        run: |
+          set -euo pipefail
+          [[ -n "${STAGE_RELEASE_GATE_FILE:-}" ]] || { echo "Missing STAGE_RELEASE_GATE_FILE secret"; exit 1; }
+          if [[ "${{ inputs.run_v1 }}" == "true" ]]; then
+            [[ -n "${STAGE_V1_CONFIG_YAML:-}" ]] || { echo "Missing STAGE_V1_CONFIG_YAML secret"; exit 1; }
+          fi
+          if [[ "${{ inputs.run_v2 }}" == "true" ]]; then
+            [[ -n "${STAGE_V2_CONFIG_YAML:-}" ]] || { echo "Missing STAGE_V2_CONFIG_YAML secret"; exit 1; }
+          fi
+
+      - name: Write stage config files
+        shell: bash
+        env:
+          STAGE_V1_CONFIG_YAML: ${{ secrets.STAGE_V1_CONFIG_YAML }}
+          STAGE_V2_CONFIG_YAML: ${{ secrets.STAGE_V2_CONFIG_YAML }}
+        run: |
+          set -euo pipefail
+          mkdir -p .release-gate
+          if [[ "${{ inputs.run_v1 }}" == "true" ]]; then
+            printf "%s" "${STAGE_V1_CONFIG_YAML}" > .release-gate/v1.yaml
+          fi
+          if [[ "${{ inputs.run_v2 }}" == "true" ]]; then
+            printf "%s" "${STAGE_V2_CONFIG_YAML}" > .release-gate/v2.yaml
+          fi
+
+      - name: Run stage release gate
+        shell: bash
+        env:
+          STAGE_RELEASE_GATE_FILE: ${{ secrets.STAGE_RELEASE_GATE_FILE }}
+        run: |
+          set -euo pipefail
+          cmd=(python scripts/release_gate.py --gate-file "${STAGE_RELEASE_GATE_FILE}" --scope "${{ inputs.gate_scope }}")
+          if [[ "${{ inputs.run_v1 }}" == "true" ]]; then
+            cmd+=(--v1-config "$PWD/.release-gate/v1.yaml")
+          fi
+          if [[ "${{ inputs.run_v2 }}" == "true" ]]; then
+            cmd+=(--v2-config "$PWD/.release-gate/v2.yaml")
+          fi
+          "${cmd[@]}"

@@ -17,7 +17,7 @@ Copy-Item .\config\v2.multiapi-routing.example.yaml .\config\v2.multiapi-routing
 
 Fill values in `config/v2.multiapi-routing.yaml`.
 
-For shared runners, prefer `gs://bucket/object.json` for `runtime.state_file` and `runtime.route_registry_file`.
+For shared runners, prefer a shared backend for `runtime.state_file` and `runtime.route_registry_file`, either `gs://bucket/object.json` or `spanner://<project>/<instance>/<database>/<table>?namespace=<name>`.
 
 ## 3. Set required environment variables
 
@@ -55,13 +55,21 @@ python .\scripts\v2_route_migrate.py --config .\config\v2.multiapi-routing.yaml 
 
 Incremental v2 runs now replay inclusively from the last watermark and deduplicate by `route_key` at the watermark boundary. This is intentional and reduces missed-record risk.
 
-## 8. Optional job-scoped execution
+## 8. Run exact validation
+
+```powershell
+python .\scripts\v2_validate.py --config .\config\v2.multiapi-routing.yaml
+```
+
+This validation pass compares the selected source jobs against both the route registry and the union of Firestore + Spanner. It is exact, disk-backed, and suitable for cutover validation on large datasets.
+
+## 9. Optional job-scoped execution
 
 ```powershell
 python .\scripts\v2_route_migrate.py --config .\config\v2.multiapi-routing.yaml --job mongo_users
 ```
 
-## 9. Expected outputs/state
+## 10. Expected outputs/state
 
 1. `runtime.state_file` (watermarks)
 2. `runtime.route_registry_file` (destination map)

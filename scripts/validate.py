@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
 from migration.config import MigrationConfig, TableMapping, load_config
 from migration.cosmos_reader import CosmosReader
 from migration.logging_utils import configure_logging
-from migration.reconciliation import aggregate_row_digests, row_digest
+from migration.reconciliation import SqliteRowDigestStore, row_digest
 from migration.retry_utils import RetryPolicy
 from migration.spanner_writer import SpannerWriter
 from migration.transform import transform_document
@@ -212,64 +212,64 @@ def _validate_mapping_checksums(
     mapping: TableMapping,
 ) -> dict[str, Any]:
     compare_columns = _comparison_columns(mapping)
-    source_hashes: dict[tuple[Any, ...], str] = {}
     transform_failures = 0
-
-    for document in reader.iter_documents(
-        container_name=mapping.source_container,
-        query=mapping.source_query,
-        page_size=500,
-    ):
-        try:
-            transformed = transform_document(document, mapping)
-        except Exception as exc:  # noqa: BLE001
-            transform_failures += 1
-            LOGGER.warning(
-                "Checksum reconciliation transform failed for %s -> %s: %s",
-                mapping.source_container,
-                mapping.target_table,
-                exc,
+    with SqliteRowDigestStore() as digest_store:
+        for document in reader.iter_documents(
+            container_name=mapping.source_container,
+            query=mapping.source_query,
+            page_size=500,
+        ):
+            try:
+                transformed = transform_document(document, mapping)
+            except Exception as exc:  # noqa: BLE001
+                transform_failures += 1
+                LOGGER.warning(
+                    "Checksum reconciliation transform failed for %s -> %s: %s",
+                    mapping.source_container,
+                    mapping.target_table,
+                    exc,
+                )
+                continue
+            if transformed.is_delete:
+                continue
+            key_tuple = tuple(transformed.row[column] for column in mapping.key_columns)
+            digest_store.upsert_source(
+                key_tuple,
+                row_digest(transformed.row, compare_columns),
             )
-            continue
-        if transformed.is_delete:
-            continue
-        key_tuple = tuple(transformed.row[column] for column in mapping.key_columns)
-        source_hashes[key_tuple] = row_digest(transformed.row, compare_columns)
 
-    target_rows = writer.read_all_rows(
-        table=mapping.target_table,
-        key_columns=mapping.key_columns,
-        data_columns=compare_columns,
-    )
-    target_hashes = {
-        key_tuple: row_digest(row, compare_columns)
-        for key_tuple, row in target_rows.items()
-    }
+        if hasattr(writer, "iter_all_rows"):
+            target_rows = writer.iter_all_rows(
+                table=mapping.target_table,
+                key_columns=mapping.key_columns,
+                data_columns=compare_columns,
+            )
+        else:
+            target_rows = writer.read_all_rows(
+                table=mapping.target_table,
+                key_columns=mapping.key_columns,
+                data_columns=compare_columns,
+            ).items()
 
-    source_keys = set(source_hashes)
-    target_keys = set(target_hashes)
-    missing_rows = len(source_keys.difference(target_keys))
-    extra_rows = len(target_keys.difference(source_keys))
-    mismatched_rows = sum(
-        1
-        for key_tuple in source_keys.intersection(target_keys)
-        if source_hashes[key_tuple] != target_hashes[key_tuple]
-    )
+        for key_tuple, row in target_rows:
+            digest_store.upsert_target(key_tuple, row_digest(row, compare_columns))
+
+        summary = digest_store.summarize()
 
     return {
         "reconciliation_mode": "checksums",
-        "cosmos_count": len(source_hashes),
-        "spanner_count": len(target_hashes),
-        "count_delta": len(target_hashes) - len(source_hashes),
+        "cosmos_count": summary.source_count,
+        "spanner_count": summary.target_count,
+        "count_delta": summary.target_count - summary.source_count,
         "sample_size": 0,
         "sample_missing": 0,
         "sample_value_mismatch_rows": 0,
         "sample_value_mismatch_fields": 0,
-        "source_checksum": aggregate_row_digests(source_hashes),
-        "target_checksum": aggregate_row_digests(target_hashes),
-        "full_missing_rows": missing_rows,
-        "full_extra_rows": extra_rows,
-        "full_mismatched_rows": mismatched_rows,
+        "source_checksum": summary.source_checksum,
+        "target_checksum": summary.target_checksum,
+        "full_missing_rows": summary.missing_rows,
+        "full_extra_rows": summary.extra_rows,
+        "full_mismatched_rows": summary.mismatched_rows,
         "transform_failures": transform_failures,
     }
 

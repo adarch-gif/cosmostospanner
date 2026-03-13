@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from migration.sharding import contains_shard_placeholders
+
 SPANNER_IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,127}$")
 
 
@@ -27,6 +29,7 @@ class SpannerConfig:
 
 @dataclass
 class RuntimeConfig:
+    deployment_environment: str = "dev"
     batch_size: int = 500
     query_page_size: int = 200
     dry_run: bool = False
@@ -42,6 +45,17 @@ class RuntimeConfig:
     retry_backoff_multiplier: float = 2.0
     retry_jitter_seconds: float = 0.25
     max_docs_per_container: dict[str, int | None] = field(default_factory=dict)
+    lease_file: str = ""
+    progress_file: str = ""
+    run_id: str = ""
+    worker_id: str = ""
+    lease_duration_seconds: int = 120
+    heartbeat_interval_seconds: int = 30
+    reader_cursor_state_file: str = ""
+    release_gate_file: str = ""
+    release_gate_scope: str = ""
+    release_gate_max_age_hours: int = 72
+    require_stage_rehearsal_for_prod: bool = False
 
 
 @dataclass
@@ -71,6 +85,9 @@ class TableMapping:
     static_columns: dict[str, Any] = field(default_factory=dict)
     delete_rule: DeleteRule | None = None
     validation_columns: list[str] = field(default_factory=list)
+    shard_count: int = 1
+    shard_mode: str = "none"  # none | client_hash | query_template
+    shard_key_source: str | None = None
 
 
 @dataclass
@@ -207,6 +224,9 @@ def _parse_mapping(raw: dict[str, Any]) -> TableMapping:
         static_columns=static_columns,
         delete_rule=delete_rule,
         validation_columns=validation_columns,
+        shard_count=int(raw.get("shard_count", 1)),
+        shard_mode=str(raw.get("shard_mode", "none")).lower(),
+        shard_key_source=raw.get("shard_key_source"),
     )
     _validate_spanner_identifier(mapping.target_table, "target_table")
     if mapping.delete_rule and not mapping.key_columns:
@@ -247,6 +267,32 @@ def _parse_mapping(raw: dict[str, Any]) -> TableMapping:
             f"validation_columns {invalid_validation_columns} are not mapped output columns "
             f"in mapping {mapping.source_container}->{mapping.target_table}."
         )
+    if mapping.shard_count <= 0:
+        raise ValueError(
+            f"shard_count must be > 0 in mapping {mapping.source_container}->{mapping.target_table}."
+        )
+    if mapping.shard_mode not in {"none", "client_hash", "query_template"}:
+        raise ValueError(
+            f"shard_mode {mapping.shard_mode!r} is invalid in mapping "
+            f"{mapping.source_container}->{mapping.target_table}."
+        )
+    if mapping.shard_count > 1 and mapping.shard_mode == "none":
+        raise ValueError(
+            f"Mapping {mapping.source_container}->{mapping.target_table} sets shard_count > 1 "
+            "but shard_mode is not configured."
+        )
+    if mapping.shard_mode == "client_hash" and mapping.shard_count > 1 and not mapping.shard_key_source:
+        raise ValueError(
+            f"Mapping {mapping.source_container}->{mapping.target_table} uses shard_mode=client_hash "
+            "but shard_key_source is missing."
+        )
+    if mapping.shard_mode == "query_template" and mapping.shard_count > 1:
+        query_template = mapping.incremental_query or mapping.source_query
+        if not contains_shard_placeholders(str(query_template or "")):
+            raise ValueError(
+                f"Mapping {mapping.source_container}->{mapping.target_table} uses shard_mode=query_template "
+                "but source_query/incremental_query does not contain shard placeholders."
+            )
     return mapping
 
 
@@ -294,6 +340,7 @@ def load_config(path: str | Path) -> MigrationConfig:
         parsed_max_docs[str(container_name)] = parsed_limit if parsed_limit > 0 else None
 
     runtime = RuntimeConfig(
+        deployment_environment=str(runtime_raw.get("deployment_environment", "dev")).lower(),
         batch_size=int(runtime_raw.get("batch_size", 500)),
         query_page_size=int(runtime_raw.get("query_page_size", 200)),
         dry_run=_parse_bool(runtime_raw.get("dry_run", False), default=False),
@@ -315,8 +362,24 @@ def load_config(path: str | Path) -> MigrationConfig:
         retry_backoff_multiplier=float(runtime_raw.get("retry_backoff_multiplier", 2.0)),
         retry_jitter_seconds=float(runtime_raw.get("retry_jitter_seconds", 0.25)),
         max_docs_per_container=parsed_max_docs,
+        lease_file=str(runtime_raw.get("lease_file", "")),
+        progress_file=str(runtime_raw.get("progress_file", "")),
+        run_id=str(runtime_raw.get("run_id", "")),
+        worker_id=str(runtime_raw.get("worker_id", os.getenv("MIGRATION_WORKER_ID", ""))),
+        lease_duration_seconds=int(runtime_raw.get("lease_duration_seconds", 120)),
+        heartbeat_interval_seconds=int(runtime_raw.get("heartbeat_interval_seconds", 30)),
+        reader_cursor_state_file=str(runtime_raw.get("reader_cursor_state_file", "")),
+        release_gate_file=str(runtime_raw.get("release_gate_file", "")),
+        release_gate_scope=str(runtime_raw.get("release_gate_scope", "")),
+        release_gate_max_age_hours=int(runtime_raw.get("release_gate_max_age_hours", 72)),
+        require_stage_rehearsal_for_prod=_parse_bool(
+            runtime_raw.get("require_stage_rehearsal_for_prod", False),
+            default=False,
+        ),
     )
 
+    if runtime.deployment_environment not in {"dev", "stage", "prod"}:
+        raise ValueError("runtime.deployment_environment must be one of: dev, stage, prod")
     if runtime.error_mode not in {"fail", "skip"}:
         raise ValueError("runtime.error_mode must be one of: fail, skip")
     if runtime.batch_size <= 0:
@@ -335,6 +398,37 @@ def load_config(path: str | Path) -> MigrationConfig:
         raise ValueError("runtime.retry_backoff_multiplier must be >= 1")
     if runtime.retry_jitter_seconds < 0:
         raise ValueError("runtime.retry_jitter_seconds must be >= 0")
+    if runtime.lease_duration_seconds <= 0:
+        raise ValueError("runtime.lease_duration_seconds must be > 0")
+    if runtime.heartbeat_interval_seconds <= 0:
+        raise ValueError("runtime.heartbeat_interval_seconds must be > 0")
+    if runtime.lease_file and runtime.heartbeat_interval_seconds >= runtime.lease_duration_seconds:
+        raise ValueError(
+            "runtime.heartbeat_interval_seconds must be less than "
+            "runtime.lease_duration_seconds when runtime.lease_file is configured"
+        )
+    if runtime.progress_file and not runtime.run_id:
+        raise ValueError(
+            "runtime.run_id must be set when runtime.progress_file is configured"
+        )
+    if runtime.release_gate_file and not runtime.release_gate_scope:
+        raise ValueError(
+            "runtime.release_gate_scope must be set when runtime.release_gate_file is configured"
+        )
+    if runtime.release_gate_max_age_hours <= 0:
+        raise ValueError("runtime.release_gate_max_age_hours must be > 0")
+    if runtime.require_stage_rehearsal_for_prod and runtime.deployment_environment != "prod":
+        raise ValueError(
+            "runtime.require_stage_rehearsal_for_prod is only valid when runtime.deployment_environment=prod"
+        )
+    if runtime.require_stage_rehearsal_for_prod and not runtime.release_gate_file:
+        raise ValueError(
+            "runtime.release_gate_file must be configured when runtime.require_stage_rehearsal_for_prod is true"
+        )
+    if runtime.require_stage_rehearsal_for_prod and not runtime.release_gate_scope:
+        raise ValueError(
+            "runtime.release_gate_scope must be configured when runtime.require_stage_rehearsal_for_prod is true"
+        )
 
     mappings_raw = raw.get("mappings", [])
     if not mappings_raw:

@@ -19,6 +19,14 @@ class CanonicalRecord:
     watermark_value: Any = None
 
 
+@dataclass(frozen=True)
+class RoutedSinkRecord:
+    destination: str
+    record: CanonicalRecord
+    stored_checksum: str
+    stored_payload_size_bytes: int
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 

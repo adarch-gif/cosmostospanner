@@ -4,10 +4,13 @@ This project provides a configurable migration framework for:
 
 1. One-time bulk backfill from Azure Cosmos DB to Google Cloud Spanner.
 2. Watermark-based incremental sync (using Cosmos `_ts`).
-3. Validation checks (sampled or full checksum-based reconciliation).
+3. Validation checks (sampled or full checksum-based reconciliation with disk-backed large-dataset support).
 4. Preflight schema/access checks before migration.
 5. Retry/backoff and dead-letter logging for operational resiliency.
 6. Security hardening: identifier validation, least-privilege IAM defaults, distributed-safe state options, and CI security scans.
+7. Shard-aware execution for large mappings and jobs, including per-shard checkpoints and shared lease coordination.
+8. Exact routed validation for v2 across source, route registry, Firestore, and Spanner.
+9. Persisted reader cursors so source scans can resume across process restarts at the last safe boundary.
 
 It now includes a separate **v2 multi-API router** for Cosmos MongoDB API and Cassandra API:
 
@@ -32,6 +35,7 @@ All mapping behavior is YAML-driven.
 9. `docs/08_OPERATIONS_AND_SRE.md`
 10. `docs/09_PRODUCTION_READINESS_REVIEW.md`
 11. `docs/10_INTEGRATION_TESTING.md`
+12. `docs/11_RELEASE_GATE_AND_STAGE_REHEARSAL.md`
 
 ## Additional deep-dive docs
 
@@ -53,12 +57,16 @@ All mapping behavior is YAML-driven.
 - `scripts/validate.py`: post-load validation runner.
 - `scripts/v2_preflight.py`: v2 source/target readiness checks.
 - `scripts/v2_route_migrate.py`: v2 Mongo/Cassandra size-routed migration runner.
+- `scripts/v2_validate.py`: v2 exact routed validation runner.
+- `scripts/release_gate.py`: stage rehearsal attestation and production release-gate runner.
+- `scripts/control_plane_status.py`: distributed run progress summary and stale-shard recovery helper.
 - `scripts/bootstrap_env.ps1`: env bootstrap + Terraform init/plan/apply/destroy helper.
 - `migration/`: shared modules for config, read, transform, write, and watermark state.
-- `migration_v2/`: v2 source adapters, sinks, router, and pipeline orchestration.
+- `migration_v2/`: v2 source adapters, sinks, router, reconciliation, and pipeline orchestration.
 - `tests/`: unit tests for config parsing, transforms, and retry behavior.
 - `tests_v2/`: unit tests for v2 router/config/pipeline logic.
 - `.github/workflows/ci.yml`: GitHub Actions workflow running test suite on push/PR.
+- `.github/workflows/stage-release-gate.yml`: manual workflow for writing stage rehearsal attestations.
 - `pyproject.toml` + `mypy.ini`: lint/type policy used by CI quality gates.
 - `infra/terraform/`: Terraform module and stack roots for v1 and v2 infrastructure.
 - `infra/terraform/envs/`: environment wrappers (`dev`, `stage`, `prod`) to deploy v1+v2 together.
@@ -158,7 +166,7 @@ python .\scripts\backfill.py --config .\config\migration.yaml --incremental
 python .\scripts\validate.py --config .\config\migration.yaml --sample-size 200
 ```
 
-For high-assurance cutover, run full checksum reconciliation:
+For high-assurance cutover, run full checksum reconciliation. The repository now uses a disk-backed reconciliation store so checksum mode stays exact without requiring the full source/target keyspace in memory:
 
 ```powershell
 python .\scripts\validate.py --config .\config\migration.yaml --reconciliation-mode checksums
@@ -205,6 +213,12 @@ python .\scripts\v2_route_migrate.py --config .\config\v2.multiapi-routing.yaml
 python .\scripts\v2_route_migrate.py --config .\config\v2.multiapi-routing.yaml --incremental
 ```
 
+5. Run exact v2 validation before cutover.
+
+```powershell
+python .\scripts\v2_validate.py --config .\config\v2.multiapi-routing.yaml
+```
+
 ## Terraform quick start (env wrappers)
 
 ```powershell
@@ -224,8 +238,15 @@ See `docs/05_TERRAFORM_IAC_GUIDE.md` for full parameter/flow details.
 - `delete_rule`: optional tombstone mapping.
 - `incremental_query`: defaults to `_ts > @last_ts` if omitted.
 - `validation_columns`: optional explicit column list for value-level validation.
-- `watermark_state_file`, `state_file`, `route_registry_file`: can be local paths or `gs://bucket/object` paths.
-- `retry_*`: retry policy for Cosmos and Spanner operations.
+- `watermark_state_file`, `state_file`, `route_registry_file`: can be local paths, `gs://bucket/object` paths, or `spanner://<project>/<instance>/<database>/<table>?namespace=<name>` control-plane locations.
+- `reader_cursor_state_file`: optional persisted source cursor state for crash/restart-aware reader resume; supports local paths, `gs://`, and `spanner://<project>/<instance>/<database>/<table>?namespace=<name>`.
+- `lease_file`: optional shared lease state for multi-runner coordination; supports local paths, `gs://`, and `spanner://...` control-plane tables.
+- `progress_file`, `run_id`: optional run-scoped shard progress tracking for distributed full runs; use a unique `run_id` per migration campaign. For transactional shard claims, point `progress_file` and `lease_file` at the same Spanner control-plane table with different namespaces.
+- `deployment_environment`, `release_gate_file`, `release_gate_scope`, `release_gate_max_age_hours`, `require_stage_rehearsal_for_prod`: optional production gate controls that block prod execution until a fresh matching stage attestation exists.
+- `worker_id`, `lease_duration_seconds`, `heartbeat_interval_seconds`: control distributed lease ownership and heartbeats.
+- `shard_count`, `shard_mode`, `shard_key_source`: control shard-based parallelization for large mappings and jobs.
+- `{{SHARD_INDEX}}`, `{{SHARD_COUNT}}`: available in query-template sharding mode for source-side partitioning.
+- `retry_*`: retry policy for Cosmos, Spanner, and reader-side stream restarts after transient mid-stream source failures.
 - `dlq_file_path`: JSONL file path for skipped/failed records.
 
 ## Recommended production extensions
@@ -239,4 +260,18 @@ See `docs/05_TERRAFORM_IAC_GUIDE.md` for full parameter/flow details.
 
 - Incremental replication is watermark-based, not full CDC/change-stream semantics.
 - Integration tests against live cloud resources require provisioned credentials and opt-in execution.
-- Distributed execution is safest when state files use `gs://` objects or another externally coordinated backend.
+- Distributed execution is safest when lease, progress, and reader-cursor state use `gs://` objects or the Spanner control-plane backend.
+- Multi-runner execution requires a shared `lease_file` plus shared state paths; otherwise runners can still overlap on the same work.
+- For resumable distributed full runs, pair `lease_file` with `progress_file` and a unique `run_id` so completed shards are skipped on reruns.
+- When `progress_file` is configured, workers claim shards from a shared run manifest instead of probing every shard blindly.
+- Full distributed runs now claim work from a run-wide manifest across all selected mappings/jobs, which improves balancing across mixed workloads.
+- For Spanner-backed coordination, create the control-plane table from [infra/ddl/spanner_control_plane.sql](C:/Users/ados1/cosmos-to-spanner-migration/infra/ddl/spanner_control_plane.sql) and use distinct namespaces for leases, progress, and reader cursors.
+- Use [scripts/control_plane_status.py](C:/Users/ados1/cosmos-to-spanner-migration/scripts/control_plane_status.py) to summarize progress state and reclaim stale running shards after runner crashes.
+- For enforced stage rehearsal before prod, use [scripts/release_gate.py](C:/Users/ados1/cosmos-to-spanner-migration/scripts/release_gate.py) and the runtime `release_gate_*` settings described in [11_RELEASE_GATE_AND_STAGE_REHEARSAL.md](C:/Users/ados1/cosmos-to-spanner-migration/docs/11_RELEASE_GATE_AND_STAGE_REHEARSAL.md).
+- `client_hash` sharding improves ownership isolation but can still duplicate source scans across workers; prefer `query_template` sharding for very large datasets.
+- Cosmos SQL source reads resume by continuation token after transient page failures.
+- Mongo and Cassandra source reads reopen from the last emitted position and skip already-emitted records; this is safest when the source query order is stable.
+- If `reader_cursor_state_file` is configured, the runtime persists the last safe source boundary after successful flushes so later process restarts can resume more precisely.
+- Full checksum reconciliation is exact and bounded-memory, but it uses local temporary disk while comparing very large datasets.
+- v2 exact validation streams Firestore, Spanner, and the configured route-registry backend; for the largest runs, prefer a Spanner-backed `route_registry_file` instead of an object-backed registry.
+- Reader cursor state is a restart hint, not a replacement for checkpoints. Clear the configured cursor state file if you intentionally want to restart a full run from the beginning.

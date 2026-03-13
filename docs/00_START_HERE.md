@@ -26,6 +26,7 @@ Both pipelines are configurable and production-oriented.
 9. `08_OPERATIONS_AND_SRE.md`
 10. `09_PRODUCTION_READINESS_REVIEW.md`
 11. `10_INTEGRATION_TESTING.md`
+12. `11_RELEASE_GATE_AND_STAGE_REHEARSAL.md`
 
 ## Fastest path for first-time setup
 
@@ -39,3 +40,5 @@ Both pipelines are configurable and production-oriented.
    - `08_OPERATIONS_AND_SRE.md`
 5. Run live-cloud preflight smoke tests before rehearsal/cutover:
    - `10_INTEGRATION_TESTING.md`
+6. If prod runs must be blocked without successful stage rehearsal:
+   - `11_RELEASE_GATE_AND_STAGE_REHEARSAL.md`

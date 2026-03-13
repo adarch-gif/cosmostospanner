@@ -17,7 +17,7 @@ Copy-Item .\config\migration.example.yaml .\config\migration.yaml
 
 Fill values in `config/migration.yaml`.
 
-For multi-runner or shared-runner operation, prefer a `gs://bucket/object.json` value for `runtime.watermark_state_file`.
+For multi-runner or shared-runner operation, prefer a shared backend for `runtime.watermark_state_file`, either `gs://bucket/object.json` or `spanner://<project>/<instance>/<database>/<table>?namespace=v1-watermarks`.
 
 ## 3. Set required secrets/environment
 
@@ -52,7 +52,7 @@ python .\scripts\backfill.py --config .\config\migration.yaml
 python .\scripts\validate.py --config .\config\migration.yaml --sample-size 200
 ```
 
-For production cutover validation, use full checksum reconciliation:
+For production cutover validation, use full checksum reconciliation. This mode is exact and now uses a disk-backed reconciliation store so it can validate large datasets without loading the full source and target keyspace into memory:
 
 ```powershell
 python .\scripts\validate.py --config .\config\migration.yaml --reconciliation-mode checksums

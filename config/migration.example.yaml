@@ -9,16 +9,29 @@ target:
   database: "spanner-db-name"
 
 runtime:
+  deployment_environment: "dev" # dev | stage | prod
   batch_size: 500
   query_page_size: 200
   dry_run: false
   log_level: "INFO"
-  watermark_state_file: "state/watermarks.json" # or gs://<bucket>/state/watermarks.json
+  watermark_state_file: "state/watermarks.json" # or gs://<bucket>/state/watermarks.json or spanner://<project>/<instance>/<database>/MigrationControlPlane?namespace=v1-watermarks
+  reader_cursor_state_file: "" # optional; use gs://<bucket>/state/v1-reader-cursors.json or spanner://<project>/<instance>/<database>/MigrationControlPlane?namespace=v1-reader-cursors
+  lease_file: "" # optional; use gs://<bucket>/leases/v1.json or spanner://<project>/<instance>/<database>/MigrationControlPlane?namespace=v1-leases
+  progress_file: "" # optional; use gs://<bucket>/progress/v1-full-run.json or spanner://<project>/<instance>/<database>/MigrationControlPlane?namespace=v1-progress
+  run_id: "" # required when progress_file is set, for example full-20260313
+  release_gate_file: "" # optional; shared stage-rehearsal attestation store, for example gs://<bucket>/release-gates.json or spanner://<project>/<instance>/<database>/MigrationControlPlane?namespace=release-gates
+  release_gate_scope: "" # required when release_gate_file is set or stage rehearsal is enforced for prod
+  release_gate_max_age_hours: 72
+  require_stage_rehearsal_for_prod: false # when true, prod runs fail unless a fresh matching stage attestation exists
+  worker_id: "" # optional; defaults to <hostname>:<pid> or set MIGRATION_WORKER_ID
+  lease_duration_seconds: 120
+  heartbeat_interval_seconds: 30
   watermark_overlap_seconds: 5
   flush_watermark_each_mapping: true
   error_mode: "fail" # fail | skip
   dlq_file_path: "state/dead_letter.jsonl"
   retry_attempts: 5
+  # retry_* also applies to mid-stream source reader resume after transient failures
   retry_initial_delay_seconds: 0.5
   retry_max_delay_seconds: 15.0
   retry_backoff_multiplier: 2.0
@@ -33,6 +46,12 @@ mappings:
     mode: "upsert" # upsert | insert | update | replace
     source_query: "SELECT * FROM c"
     incremental_query: "SELECT * FROM c WHERE c._ts > @last_ts"
+    shard_count: 1
+    shard_mode: "none" # none | client_hash | query_template
+    shard_key_source: "id" # required when shard_mode=client_hash and shard_count > 1
+    # For shard_mode=query_template, include {{SHARD_INDEX}} and/or {{SHARD_COUNT}}
+    # in source_query or incremental_query, for example:
+    # source_query: "SELECT * FROM c WHERE MOD(c.partitionBucket, {{SHARD_COUNT}}) = {{SHARD_INDEX}}"
     columns:
       - target: "user_id"
         source: "id"

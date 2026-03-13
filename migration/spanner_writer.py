@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Iterable
 
 from google.cloud import spanner
 from google.cloud.spanner_v1 import KeySet
@@ -180,6 +180,31 @@ class SpannerWriter:
             policy=self._retry_policy,
             logger=LOGGER,
         )
+
+    def iter_all_rows(
+        self,
+        table: str,
+        key_columns: list[str],
+        data_columns: list[str],
+    ) -> Iterable[tuple[tuple[Any, ...], dict[str, Any]]]:
+        selected_columns: list[str] = []
+        for column in [*key_columns, *data_columns]:
+            if column not in selected_columns:
+                selected_columns.append(column)
+
+        quoted_columns = ", ".join(f"`{column}`" for column in selected_columns)
+        order_clause = ", ".join(f"`{column}`" for column in key_columns)
+        # Table and column identifiers are validated during config loading.
+        sql = f"SELECT {quoted_columns} FROM `{table}` ORDER BY {order_clause}"  # nosec B608
+        with self._database.snapshot() as snapshot:
+            rows = snapshot.execute_sql(sql)
+            for row in rows:
+                row_dict = {
+                    selected_columns[idx]: row[idx]
+                    for idx in range(len(selected_columns))
+                }
+                key_tuple = tuple(row_dict[col] for col in key_columns)
+                yield key_tuple, row_dict
 
     def table_exists(self, table: str) -> bool:
         def operation() -> bool:

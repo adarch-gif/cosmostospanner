@@ -10,6 +10,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from migration.logging_utils import configure_logging
+from migration.release_gate import (
+    enforce_stage_rehearsal_or_raise,
+    logical_fingerprint_v2,
+)
 from migration_v2.config import load_v2_config
 from migration_v2.pipeline import V2MigrationPipeline
 
@@ -54,13 +58,26 @@ def main() -> int:
         config.runtime.dry_run = True
 
     configure_logging(config.runtime.log_level)
+    selected_jobs = [
+        job
+        for job in config.jobs
+        if job.enabled and (not args.jobs or job.name in set(args.jobs))
+    ]
+    if not selected_jobs:
+        LOGGER.error("No jobs selected. Check --job filters or enabled flags.")
+        return 1
+    enforce_stage_rehearsal_or_raise(
+        runtime=config.runtime,
+        pipeline="v2",
+        logical_fingerprint=logical_fingerprint_v2(config, selected_jobs),
+    )
     pipeline = V2MigrationPipeline(config)
     stats_by_job = pipeline.run(job_names=args.jobs)
 
     has_issues = False
     for job_name, stats in stats_by_job.items():
         LOGGER.info(
-            "V2 job summary %s | seen=%s firestore=%s spanner=%s moved=%s unchanged=%s checkpoint_skipped=%s rejected=%s failed=%s cleanup_failed=%s out_of_order=%s watermark=%s",
+            "V2 job summary %s | seen=%s firestore=%s spanner=%s moved=%s unchanged=%s checkpoint_skipped=%s rejected=%s failed=%s cleanup_failed=%s lease_conflicts=%s progress_skips=%s out_of_order=%s watermark=%s",
             job_name,
             stats.docs_seen,
             stats.firestore_writes,
@@ -71,6 +88,8 @@ def main() -> int:
             stats.rejected_records,
             stats.failed_records,
             stats.cleanup_failed,
+            stats.lease_conflicts,
+            stats.progress_skips,
             stats.out_of_order_records,
             stats.max_watermark,
         )
