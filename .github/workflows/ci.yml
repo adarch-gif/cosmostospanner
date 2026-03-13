@@ -26,6 +26,57 @@ jobs:
         run: |
           python -m pytest -q
 
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install quality tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-dev.txt
+
+      - name: Ruff lint
+        run: |
+          ruff check .
+
+      - name: Mypy type check
+        run: |
+          mypy migration migration_v2 scripts
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install security tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-dev.txt
+          python -m pip install pip-audit
+
+      - name: Bandit security scan
+        run: |
+          bandit -q -r migration migration_v2 scripts -x tests,tests_v2
+
+      - name: Dependency vulnerability audit
+        run: |
+          python -m pip_audit -r requirements.txt
+
   terraform:
     runs-on: ubuntu-latest
     steps:

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+SPANNER_IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,127}$")
 
 
 @dataclass
@@ -113,6 +116,15 @@ def _parse_string_list(value: Any, field_name: str) -> list[str]:
     return parsed
 
 
+def _validate_spanner_identifier(name: str, field_name: str) -> None:
+    if not SPANNER_IDENTIFIER_RE.fullmatch(name):
+        raise ValueError(
+            f"{field_name} must be a valid Spanner identifier "
+            "(start with letter, followed by letters/numbers/_). "
+            f"Received: {name!r}"
+        )
+
+
 def _parse_column_rules(raw_columns: Any) -> list[ColumnRule]:
     rules: list[ColumnRule] = []
     if isinstance(raw_columns, list):
@@ -154,6 +166,7 @@ def _parse_column_rules(raw_columns: Any) -> list[ColumnRule]:
 def _validate_column_targets(rules: list[ColumnRule]) -> None:
     seen: set[str] = set()
     for rule in rules:
+        _validate_spanner_identifier(rule.target, "columns[].target")
         if rule.target in seen:
             raise ValueError(f"Duplicate target column in mapping: {rule.target}")
         seen.add(rule.target)
@@ -195,6 +208,7 @@ def _parse_mapping(raw: dict[str, Any]) -> TableMapping:
         delete_rule=delete_rule,
         validation_columns=validation_columns,
     )
+    _validate_spanner_identifier(mapping.target_table, "target_table")
     if mapping.delete_rule and not mapping.key_columns:
         raise ValueError(
             f"Mapping {mapping.source_container}->{mapping.target_table} uses delete_rule "
@@ -208,6 +222,10 @@ def _parse_mapping(raw: dict[str, Any]) -> TableMapping:
 
     available_targets = {rule.target for rule in mapping.columns}
     available_targets.update(mapping.static_columns.keys())
+    for key_column in mapping.key_columns:
+        _validate_spanner_identifier(key_column, "key_columns[]")
+    for column_name in mapping.static_columns:
+        _validate_spanner_identifier(column_name, "static_columns key")
     missing_key_targets = [k for k in mapping.key_columns if k not in available_targets]
     if missing_key_targets:
         raise ValueError(
@@ -219,6 +237,8 @@ def _parse_mapping(raw: dict[str, Any]) -> TableMapping:
             f"validation_columns has duplicates in mapping "
             f"{mapping.source_container}->{mapping.target_table}."
         )
+    for validation_column in mapping.validation_columns:
+        _validate_spanner_identifier(validation_column, "validation_columns[]")
     invalid_validation_columns = [
         col for col in mapping.validation_columns if col not in available_targets
     ]
@@ -252,15 +272,16 @@ def load_config(path: str | Path) -> MigrationConfig:
     )
 
     target_raw = dict(_require(raw, "target"))
-    target = SpannerConfig(
-        project=target_raw.get("project") or os.getenv("GOOGLE_CLOUD_PROJECT", ""),
-        instance=_require(target_raw, "instance"),
-        database=_require(target_raw, "database"),
-    )
-    if not target.project:
+    target_project = target_raw.get("project") or os.getenv("GOOGLE_CLOUD_PROJECT", "")
+    if not target_project:
         raise ValueError(
             "Spanner target project is missing. Set target.project or GOOGLE_CLOUD_PROJECT."
         )
+    target = SpannerConfig(
+        project=str(target_project),
+        instance=_require(target_raw, "instance"),
+        database=_require(target_raw, "database"),
+    )
 
     runtime_raw = dict(raw.get("runtime", {}))
     raw_max_docs = runtime_raw.get("max_docs_per_container", {})

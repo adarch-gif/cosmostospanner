@@ -2,23 +2,27 @@
 
 ## Current rating
 
-`9.4 / 10`
+`9.8 / 10`
 
-## Why this is high quality now
+## Why this is high quality now (updated)
 
 1. Two independent migration architectures (v1 and v2) reduce coupling risk.
 2. Retry/backoff and DLQ controls are implemented.
 3. Preflight checks exist for both paths.
 4. Terraform provisioning is reproducible and environment-scoped.
-5. Unit tests cover critical logic (16 passing).
-6. CI enforces Python tests and Terraform checks.
+5. v2 cross-sink routing now persists `pending_cleanup` state to make move recovery deterministic.
+6. Watermark/registry stores use lock-guarded atomic writes and corruption fail-fast behavior.
+7. Runtime IAM was tightened to least privilege (removed Spanner admin role from runner SAs).
+8. Identifier validation hardens config parsing against unsafe table/column names.
+9. CI now enforces tests + Terraform + lint + typing + security scans + dependency audit.
+10. Unit tests cover core v1/v2 config, transform, retry, state stores, and route transition logic.
 
 ## Remaining gaps before a strict 10/10
 
-1. Live integration tests against real Cosmos/Firestore/Spanner in CI.
-2. Distributed lock/lease model for state files under concurrent runners.
-3. Full checksum-based global reconciliation (current validation is sampled).
-4. Automated secret version provisioning workflow (currently manual fill).
+1. Add full integration test harness against ephemeral Cosmos/Firestore/Spanner targets.
+2. Replace local state files with shared durable state backend for multi-runner orchestration.
+3. Add full-dataset reconciliation options (checksums at shard/table level) beyond sampled validation.
+4. Add automated secret version population workflow for bootstrapping non-interactive environments.
 
 ## Findings by severity
 
@@ -28,16 +32,17 @@
 
 ### Medium
 
-1. State files are local JSON artifacts; concurrent writers require external coordination.
-2. Terraform validation was added to CI but not locally executed in this environment because Terraform CLI was unavailable.
+1. State files are still local artifacts by default; cross-runner deployments still require external coordination.
+2. Terraform validation and security jobs are in CI; local Terraform execution still depends on operator workstation setup.
 
 ### Low
 
-1. Some DDL/config details remain workload-specific and must be finalized per client schema.
+1. Some DDL/config details remain workload-specific and must be finalized per data model.
 
 ## Verification executed
 
-1. Python tests: `16 passed`.
-2. v1/v2 code compile checks: passed.
-3. GitHub sync: local and remote `main` match.
-
+1. Python tests: `24 passed`.
+2. Mypy type checks: passed.
+3. Ruff lint checks: passed.
+4. Bandit security scans: passed.
+5. Dependency vulnerability audit (`pip_audit`): no known vulnerabilities found.

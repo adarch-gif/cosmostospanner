@@ -7,6 +7,7 @@ This project provides a configurable migration framework for:
 3. Validation checks (counts, key existence, and sample value-level comparison).
 4. Preflight schema/access checks before migration.
 5. Retry/backoff and dead-letter logging for operational resiliency.
+6. Security hardening: identifier validation, least-privilege IAM defaults, and CI security scans.
 
 It now includes a separate **v2 multi-API router** for Cosmos MongoDB API and Cassandra API:
 
@@ -56,6 +57,7 @@ All mapping behavior is YAML-driven.
 - `tests/`: unit tests for config parsing, transforms, and retry behavior.
 - `tests_v2/`: unit tests for v2 router/config/pipeline logic.
 - `.github/workflows/ci.yml`: GitHub Actions workflow running test suite on push/PR.
+- `pyproject.toml` + `mypy.ini`: lint/type policy used by CI quality gates.
 - `infra/terraform/`: Terraform module and stack roots for v1 and v2 infrastructure.
 - `infra/terraform/envs/`: environment wrappers (`dev`, `stage`, `prod`) to deploy v1+v2 together.
 
@@ -158,6 +160,15 @@ python .\scripts\validate.py --config .\config\migration.yaml --sample-size 200
 
 ```powershell
 python -m pytest -q
+```
+
+9. Run quality/security checks (same guardrails used in CI).
+
+```powershell
+ruff check .
+python -m mypy migration migration_v2 scripts
+bandit -q -r migration migration_v2 scripts -x tests,tests_v2
+python -m pip_audit -r requirements.txt
 ```
 
 ## V2 quick start (Mongo/Cassandra with dynamic Firestore/Spanner routing)

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any
 
 from migration.retry_utils import RetryPolicy, run_with_retry
 from migration_v2.config import SpannerTargetConfig

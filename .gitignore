@@ -14,3 +14,10 @@ state/
 *.tfstate
 *.tfstate.*
 *.tfplan
+*.tfvars
+backend.tf
+.env
+.env.*
+config/migration.yaml
+config/v2.multiapi-routing.yaml
+.pip_audit_cache/

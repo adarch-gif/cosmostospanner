@@ -6,18 +6,27 @@ from migration_v2.config import MongoJobConfig, RoutingConfig
 from migration_v2.models import CanonicalRecord
 from migration_v2.pipeline import JobStats, V2MigrationPipeline
 from migration_v2.router import SizeRouter
-from migration_v2.state_store import RouteRegistryStore
+from migration_v2.state_store import (
+    SYNC_STATE_COMPLETE,
+    SYNC_STATE_PENDING_CLEANUP,
+    RouteRegistryEntry,
+    RouteRegistryStore,
+)
 
 
 class _FakeSink:
     def __init__(self) -> None:
         self.upserts: list[str] = []
         self.deletes: list[str] = []
+        self.fail_delete_count = 0
 
     def upsert(self, record: CanonicalRecord) -> None:
         self.upserts.append(record.route_key)
 
     def delete(self, record: CanonicalRecord) -> None:
+        if self.fail_delete_count > 0:
+            self.fail_delete_count -= 1
+            raise RuntimeError("simulated delete failure")
         self.deletes.append(record.route_key)
 
 
@@ -106,3 +115,91 @@ def test_apply_route_skips_unchanged_checksum(tmp_path) -> None:
     assert stats.unchanged_skipped == 1
     assert len(pipeline.firestore_sink.upserts) == 1
 
+
+def test_apply_route_keeps_pending_cleanup_when_delete_fails_in_skip_mode(tmp_path) -> None:
+    pipeline = V2MigrationPipeline.__new__(V2MigrationPipeline)
+    pipeline.config = SimpleNamespace(runtime=SimpleNamespace(error_mode="skip"))
+    pipeline.router = SizeRouter(
+        RoutingConfig(
+            firestore_lt_bytes=1000,
+            spanner_max_payload_bytes=10_000,
+            payload_size_overhead_bytes=0,
+        )
+    )
+    pipeline.registry = RouteRegistryStore(str(tmp_path / "registry.json"))
+    pipeline.dead_letter = SimpleNamespace(write=lambda **_: None)
+    pipeline.firestore_sink = _FakeSink()
+    pipeline.spanner_sink = _FakeSink()
+
+    job = MongoJobConfig(
+        name="mongo_users",
+        api="mongodb",
+        route_namespace="mongodb.appdb.users",
+        key_fields=["id"],
+        connection_string="mongodb://x",
+        database="appdb",
+        collection="users",
+    )
+    stats = JobStats()
+
+    first = _record(size=500, checksum="a")
+    pipeline._apply_route(job, first, stats)
+
+    pipeline.firestore_sink.fail_delete_count = 1
+    second = _record(size=2_000, checksum="b")
+    pipeline._apply_route(job, second, stats)
+
+    entry = pipeline.registry.get_entry(second.route_key)
+    assert entry is not None
+    assert entry.destination == "spanner"
+    assert entry.sync_state == SYNC_STATE_PENDING_CLEANUP
+    assert entry.cleanup_from_destination == "firestore"
+    assert stats.cleanup_failed == 1
+
+
+def test_apply_route_reconciles_pending_cleanup_then_skips_unchanged(tmp_path) -> None:
+    pipeline = V2MigrationPipeline.__new__(V2MigrationPipeline)
+    pipeline.config = SimpleNamespace(runtime=SimpleNamespace(error_mode="fail"))
+    pipeline.router = SizeRouter(
+        RoutingConfig(
+            firestore_lt_bytes=1000,
+            spanner_max_payload_bytes=10_000,
+            payload_size_overhead_bytes=0,
+        )
+    )
+    pipeline.registry = RouteRegistryStore(str(tmp_path / "registry.json"))
+    pipeline.dead_letter = SimpleNamespace(write=lambda **_: None)
+    pipeline.firestore_sink = _FakeSink()
+    pipeline.spanner_sink = _FakeSink()
+    job = MongoJobConfig(
+        name="mongo_users",
+        api="mongodb",
+        route_namespace="mongodb.appdb.users",
+        key_fields=["id"],
+        connection_string="mongodb://x",
+        database="appdb",
+        collection="users",
+    )
+    stats = JobStats()
+    rec = _record(size=2_000, checksum="same")
+    pipeline.registry.set_entry(
+        rec.route_key,
+        RouteRegistryEntry(
+            destination="spanner",
+            checksum="same",
+            payload_size_bytes=2_000,
+            updated_at="2026-03-12T00:00:00+00:00",
+            sync_state=SYNC_STATE_PENDING_CLEANUP,
+            cleanup_from_destination="firestore",
+        ),
+    )
+    pipeline.registry.flush()
+
+    pipeline._apply_route(job, rec, stats)
+    entry = pipeline.registry.get_entry(rec.route_key)
+    assert entry is not None
+    assert entry.sync_state == SYNC_STATE_COMPLETE
+    assert entry.cleanup_from_destination is None
+    assert stats.moved_records == 1
+    assert stats.unchanged_skipped == 1
+    assert pipeline.spanner_sink.upserts == []

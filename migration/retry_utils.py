@@ -3,11 +3,18 @@ from __future__ import annotations
 import random
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, TypeVar
-
-from migration.config import RuntimeConfig
+from typing import Any, Callable, Protocol, TypeVar
 
 T = TypeVar("T")
+SECURE_RNG = random.SystemRandom()
+
+
+class SupportsRetryConfig(Protocol):
+    retry_attempts: int
+    retry_initial_delay_seconds: float
+    retry_max_delay_seconds: float
+    retry_backoff_multiplier: float
+    retry_jitter_seconds: float
 
 
 @dataclass(frozen=True)
@@ -19,7 +26,7 @@ class RetryPolicy:
     jitter_seconds: float
 
     @classmethod
-    def from_runtime(cls, runtime: RuntimeConfig) -> "RetryPolicy":
+    def from_runtime(cls, runtime: SupportsRetryConfig) -> "RetryPolicy":
         return cls(
             attempts=runtime.retry_attempts,
             initial_delay_seconds=runtime.retry_initial_delay_seconds,
@@ -50,7 +57,7 @@ def run_with_retry(
                 policy.initial_delay_seconds * (policy.backoff_multiplier ** (attempt - 1)),
             )
             if policy.jitter_seconds > 0:
-                delay += random.uniform(0, policy.jitter_seconds)
+                delay += SECURE_RNG.uniform(0, policy.jitter_seconds)
             logger.warning(
                 "Retrying %s after attempt %s/%s due to %s: %s (sleep %.2fs)",
                 operation_name,
@@ -63,4 +70,3 @@ def run_with_retry(
             time.sleep(delay)
 
     raise RuntimeError(f"Unexpected retry state for operation {operation_name}.") from last_error
-

@@ -27,7 +27,6 @@ module "platform" {
     "roles/datastore.user",
     "roles/logging.logWriter",
     "roles/secretmanager.secretAccessor",
-    "roles/spanner.databaseAdmin",
     "roles/spanner.databaseUser"
   ]
 
@@ -52,4 +51,3 @@ module "platform" {
   spanner_database_name    = var.spanner_database_name
   spanner_database_ddl     = concat(local.default_v2_spanner_ddl, var.spanner_database_ddl_additional)
 }
-

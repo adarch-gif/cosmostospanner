@@ -57,7 +57,6 @@ jobs:
     table: "orders"
     route_namespace: "cassandra.appks.orders"
     key_fields: ["order_id"]
-    source_query: "SELECT * FROM orders"
+    source_query: "SELECT * FROM orders WHERE updated_at > %s ALLOW FILTERING"
     incremental_field: "updated_at"
     page_size: 500
-

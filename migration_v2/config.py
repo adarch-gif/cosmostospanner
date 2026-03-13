@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+SPANNER_IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,127}$")
+CASSANDRA_IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,47}$")
 
 
 @dataclass
@@ -132,6 +136,15 @@ def _parse_key_fields(raw: Any, job_name: str) -> list[str]:
     return parsed
 
 
+def _validate_cassandra_identifier(value: str, field_name: str, job_name: str) -> None:
+    if not CASSANDRA_IDENTIFIER_RE.fullmatch(value):
+        raise ValueError(
+            f"Job {job_name} {field_name} must be a valid Cassandra identifier "
+            "(start with letter, followed by letters/numbers/_). "
+            f"Received: {value!r}"
+        )
+
+
 def _parse_runtime(raw: dict[str, Any]) -> RuntimeV2Config:
     runtime_raw = dict(raw.get("runtime", {}))
     max_records_raw = runtime_raw.get("max_records_per_job", {})
@@ -228,11 +241,18 @@ def _parse_spanner_target(raw: dict[str, Any]) -> SpannerTargetConfig:
     project = spanner_raw.get("project") or os.getenv("GOOGLE_CLOUD_PROJECT", "")
     if not project:
         raise ValueError("targets.spanner.project is missing. Set it or GOOGLE_CLOUD_PROJECT.")
+    table = str(_require(spanner_raw, "table"))
+    if not SPANNER_IDENTIFIER_RE.fullmatch(table):
+        raise ValueError(
+            "targets.spanner.table must be a valid Spanner identifier "
+            "(start with letter, followed by letters/numbers/_). "
+            f"Received: {table!r}"
+        )
     return SpannerTargetConfig(
         project=str(project),
         instance=str(_require(spanner_raw, "instance")),
         database=str(_require(spanner_raw, "database")),
-        table=str(_require(spanner_raw, "table")),
+        table=table,
     )
 
 
@@ -295,6 +315,16 @@ def _parse_jobs(raw: dict[str, Any]) -> list[MongoJobConfig | CassandraJobConfig
                     f"Job {job_name} contact_points must be a non-empty list."
                 )
             contact_points = [str(point) for point in contact_points_raw]
+            keyspace = str(_require(entry, "keyspace"))
+            table = str(_require(entry, "table"))
+            _validate_cassandra_identifier(keyspace, "keyspace", job_name)
+            _validate_cassandra_identifier(table, "table", job_name)
+            if common["incremental_field"]:
+                _validate_cassandra_identifier(
+                    str(common["incremental_field"]),
+                    "incremental_field",
+                    job_name,
+                )
             parsed_jobs.append(
                 CassandraJobConfig(
                     **common,
@@ -302,8 +332,8 @@ def _parse_jobs(raw: dict[str, Any]) -> list[MongoJobConfig | CassandraJobConfig
                     port=int(entry.get("port", 10350)),
                     username=username,
                     password=password,
-                    keyspace=str(_require(entry, "keyspace")),
-                    table=str(_require(entry, "table")),
+                    keyspace=keyspace,
+                    table=table,
                 )
             )
             continue
@@ -329,4 +359,3 @@ def load_v2_config(path: str | Path) -> PipelineV2Config:
         spanner_target=spanner_target,
         jobs=jobs,
     )
-

@@ -19,7 +19,6 @@ module "platform" {
   service_account_roles = [
     "roles/logging.logWriter",
     "roles/secretmanager.secretAccessor",
-    "roles/spanner.databaseAdmin",
     "roles/spanner.databaseUser"
   ]
 
@@ -41,4 +40,3 @@ module "platform" {
 
   create_firestore_database = false
 }
-

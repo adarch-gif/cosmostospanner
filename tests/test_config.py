@@ -102,3 +102,9 @@ def test_load_config_rejects_bad_retry_settings(tmp_path) -> None:
     with pytest.raises(ValueError, match="retry_attempts"):
         load_config(_write_config(tmp_path, bad))
 
+
+def test_load_config_rejects_invalid_spanner_identifiers(tmp_path) -> None:
+    cfg = _base_config()
+    cfg["mappings"][0]["target_table"] = "Users;DROP TABLE X"
+    with pytest.raises(ValueError, match="valid Spanner identifier"):
+        load_config(_write_config(tmp_path, cfg))

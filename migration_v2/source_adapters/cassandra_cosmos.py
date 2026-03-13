@@ -38,20 +38,23 @@ class CassandraCosmosSourceAdapter:
         try:
             session.set_keyspace(job.keyspace)
 
-            query = job.source_query or f"SELECT * FROM {job.table}"
+            query = job.source_query or f"SELECT * FROM {job.table}"  # nosec B608
             params = None
             if mode == "incremental" and job.incremental_field:
                 if watermark is not None:
                     if "%s" in query:
                         params = (watermark,)
-                    elif "{last_watermark}" in query:
-                        query = query.replace("{last_watermark}", str(watermark))
                     elif not job.source_query:
                         query = (
-                            f"SELECT * FROM {job.table} WHERE {job.incremental_field} > %s "
+                            f"SELECT * FROM {job.table} WHERE {job.incremental_field} > %s "  # nosec B608
                             "ALLOW FILTERING"
                         )
                         params = (watermark,)
+                    else:
+                        raise ValueError(
+                            f"Job {job.name} incremental source_query must include a %s placeholder "
+                            "for parameterized watermark binding."
+                        )
             LOGGER.info(
                 "Cassandra source job %s query=%s mode=%s watermark=%s",
                 job.name,

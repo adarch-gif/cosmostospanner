@@ -17,7 +17,13 @@ from migration_v2.sink_adapters.firestore_sink import FirestoreSinkAdapter
 from migration_v2.sink_adapters.spanner_sink import SpannerSinkAdapter
 from migration_v2.source_adapters.cassandra_cosmos import CassandraCosmosSourceAdapter
 from migration_v2.source_adapters.mongo_cosmos import MongoCosmosSourceAdapter
-from migration_v2.state_store import RouteRegistryEntry, RouteRegistryStore, WatermarkStore
+from migration_v2.state_store import (
+    SYNC_STATE_COMPLETE,
+    SYNC_STATE_PENDING_CLEANUP,
+    RouteRegistryEntry,
+    RouteRegistryStore,
+    WatermarkStore,
+)
 
 LOGGER = logging.getLogger("v2.pipeline")
 
@@ -116,6 +122,75 @@ class V2MigrationPipeline:
             source_document=record.payload if record else None,
         )
 
+    def _sink_for_destination(self, destination: str) -> FirestoreSinkAdapter | SpannerSinkAdapter:
+        if destination == RouteDestination.FIRESTORE.value:
+            return self.firestore_sink
+        if destination == RouteDestination.SPANNER.value:
+            return self.spanner_sink
+        raise ValueError(f"Unsupported destination in route registry: {destination}")
+
+    def _finalize_pending_cleanup(
+        self,
+        job: MongoJobConfig | CassandraJobConfig,
+        record: CanonicalRecord,
+        previous: RouteRegistryEntry,
+        stats: JobStats,
+    ) -> bool:
+        if previous.sync_state != SYNC_STATE_PENDING_CLEANUP:
+            return True
+
+        cleanup_from = previous.cleanup_from_destination
+        if not cleanup_from:
+            LOGGER.warning(
+                "Route registry entry %s has pending_cleanup without cleanup_from_destination. "
+                "Marking as complete.",
+                record.route_key,
+            )
+            self.registry.set_entry(
+                record.route_key,
+                RouteRegistryEntry(
+                    destination=previous.destination,
+                    checksum=previous.checksum,
+                    payload_size_bytes=previous.payload_size_bytes,
+                    updated_at=utc_now_iso(),
+                    sync_state=SYNC_STATE_COMPLETE,
+                    cleanup_from_destination=None,
+                ),
+            )
+            self.registry.flush()
+            return True
+
+        cleanup_sink = self._sink_for_destination(cleanup_from)
+        try:
+            cleanup_sink.delete(record)
+            stats.moved_records += 1
+        except Exception as exc:  # noqa: BLE001
+            stats.cleanup_failed += 1
+            if self.config.runtime.error_mode == "skip":
+                self._write_dead_letter(
+                    stage="route_cleanup_reconcile",
+                    job_name=job.name,
+                    source_namespace=record.source_namespace,
+                    error=exc,
+                    record=record,
+                )
+                return False
+            raise
+
+        self.registry.set_entry(
+            record.route_key,
+            RouteRegistryEntry(
+                destination=previous.destination,
+                checksum=previous.checksum,
+                payload_size_bytes=previous.payload_size_bytes,
+                updated_at=utc_now_iso(),
+                sync_state=SYNC_STATE_COMPLETE,
+                cleanup_from_destination=None,
+            ),
+        )
+        self.registry.flush()
+        return True
+
     def _apply_route(
         self,
         job: MongoJobConfig | CassandraJobConfig,
@@ -140,23 +215,28 @@ class V2MigrationPipeline:
             raise error
 
         previous = self.registry.get_entry(record.route_key)
+        if previous and previous.sync_state == SYNC_STATE_PENDING_CLEANUP:
+            cleanup_ok = self._finalize_pending_cleanup(job, record, previous, stats)
+            if not cleanup_ok:
+                return
+            previous = self.registry.get_entry(record.route_key)
+
         new_destination = decision.destination.value
-        if previous and previous.destination == new_destination and previous.checksum == record.checksum:
+        if (
+            previous
+            and previous.sync_state == SYNC_STATE_COMPLETE
+            and previous.destination == new_destination
+            and previous.checksum == record.checksum
+        ):
             stats.unchanged_skipped += 1
             return
 
-        destination_sink = (
-            self.firestore_sink
-            if decision.destination == RouteDestination.FIRESTORE
-            else self.spanner_sink
-        )
+        destination_sink = self._sink_for_destination(new_destination)
         old_sink = None
+        old_destination = None
         if previous and previous.destination != new_destination:
-            old_sink = (
-                self.firestore_sink
-                if previous.destination == RouteDestination.FIRESTORE.value
-                else self.spanner_sink
-            )
+            old_destination = previous.destination
+            old_sink = self._sink_for_destination(old_destination)
 
         try:
             destination_sink.upsert(record)
@@ -179,6 +259,19 @@ class V2MigrationPipeline:
             stats.spanner_writes += 1
 
         if old_sink:
+            # Persist move-intent before cleanup so interrupted runs can reconcile deterministically.
+            self.registry.set_entry(
+                record.route_key,
+                RouteRegistryEntry(
+                    destination=new_destination,
+                    checksum=record.checksum,
+                    payload_size_bytes=record.payload_size_bytes,
+                    updated_at=utc_now_iso(),
+                    sync_state=SYNC_STATE_PENDING_CLEANUP,
+                    cleanup_from_destination=old_destination,
+                ),
+            )
+            self.registry.flush()
             try:
                 old_sink.delete(record)
                 stats.moved_records += 1
@@ -202,8 +295,12 @@ class V2MigrationPipeline:
                 checksum=record.checksum,
                 payload_size_bytes=record.payload_size_bytes,
                 updated_at=utc_now_iso(),
+                sync_state=SYNC_STATE_COMPLETE,
+                cleanup_from_destination=None,
             ),
         )
+        if old_sink:
+            self.registry.flush()
 
     def run(self, *, job_names: list[str] | None = None) -> dict[str, JobStats]:
         jobs = self._selected_jobs(job_names)
@@ -279,4 +376,3 @@ class V2MigrationPipeline:
                 except Exception as exc:  # noqa: BLE001
                     issues.append(f"Source preflight failed for job {job.name}: {exc}")
         return issues
-

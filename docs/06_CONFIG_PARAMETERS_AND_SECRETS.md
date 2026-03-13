@@ -48,7 +48,19 @@ Cassandra job secrets:
 2. `password` or `password_env`
 3. `contact_points`
 
-## 4. Terraform required inputs
+## 4. Security validation constraints
+
+The loaders now reject unsafe identifier values up front:
+
+1. v1 `target_table`, `columns[].target`, `key_columns[]`, `static_columns` keys, and `validation_columns[]` must be valid Spanner identifiers.
+2. v2 `targets.spanner.table` must be a valid Spanner identifier.
+3. v2 Cassandra `keyspace`, `table`, and `incremental_field` (when provided) must be valid Cassandra identifiers.
+
+For incremental Cassandra jobs with a custom `source_query`:
+
+1. Use `%s` placeholder binding for watermark values.
+2. String interpolation placeholders like `{last_watermark}` are intentionally not supported.
+## 5. Terraform required inputs
 
 For each env wrapper:
 
@@ -58,7 +70,7 @@ For each env wrapper:
 4. Firestore location for v2
 5. Optional explicit state bucket names
 
-## 5. Secret Manager mapping
+## 6. Secret Manager mapping
 
 Terraform creates secret containers. You still need secret **versions** with values.
 
@@ -73,7 +85,7 @@ Terraform creates secret containers. You still need secret **versions** with val
 2. `cosmos-cassandra-username`
 3. `cosmos-cassandra-password`
 
-## 6. Credentials model (client ID / key / secret guidance)
+## 7. Credentials model (client ID / key / secret guidance)
 
 This repo does not require a separate “client id/client secret” inside app configs if you use ADC.
 
@@ -89,4 +101,3 @@ For Azure Cosmos authentication:
 1. SQL API: account key
 2. Mongo API: connection string (contains credentials)
 3. Cassandra API: username + password
-

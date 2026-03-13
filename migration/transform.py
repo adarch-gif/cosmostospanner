@@ -106,11 +106,11 @@ def _extract_column(document: dict[str, Any], rule: ColumnRule) -> Any:
     try:
         raw = _get_nested_value(document, rule.source)
         return _apply_converter(rule.converter, raw)
-    except KeyError:
+    except KeyError as exc:
         if rule.default is not None:
             return _resolve_marker(rule.default)
         if rule.required:
-            raise ValueError(f"Missing required source field: {rule.source}")
+            raise ValueError(f"Missing required source field: {rule.source}") from exc
         return None
 
 
@@ -142,4 +142,3 @@ def transform_document(document: dict[str, Any], mapping: TableMapping) -> Trans
     source_ts = int(document.get("_ts", 0) or 0)
     is_delete = _is_delete_event(document, mapping.delete_rule)
     return TransformOutput(row=row, is_delete=is_delete, source_ts=source_ts)
-

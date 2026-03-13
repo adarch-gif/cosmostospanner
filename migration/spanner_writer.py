@@ -76,7 +76,7 @@ class SpannerWriter:
 
     def count_rows(self, table: str) -> int:
         def operation() -> int:
-            sql = f"SELECT COUNT(1) FROM `{table}`"
+            sql = f"SELECT COUNT(1) FROM `{table}`"  # nosec B608
             with self._database.snapshot() as snapshot:
                 row = next(iter(snapshot.execute_sql(sql)), [0])
             return int(row[0])
