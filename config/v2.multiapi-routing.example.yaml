@@ -1,14 +1,27 @@
 runtime:
+  deployment_environment: "dev" # dev | stage | prod
   mode: "full" # full | incremental
   batch_size: 200
   dry_run: false
   log_level: "INFO"
   error_mode: "fail" # fail | skip
-  state_file: "state/v2_watermarks.json" # or gs://<bucket>/state/v2_watermarks.json
-  route_registry_file: "state/v2_route_registry.json" # or gs://<bucket>/state/v2_route_registry.json
+  state_file: "state/v2_watermarks.json" # or gs://<bucket>/state/v2_watermarks.json or spanner://<project>/<instance>/<database>/MigrationControlPlane?namespace=v2-watermarks
+  route_registry_file: "state/v2_route_registry.json" # or gs://<bucket>/state/v2_route_registry.json or spanner://<project>/<instance>/<database>/MigrationControlPlane?namespace=v2-route-registry
+  reader_cursor_state_file: "" # optional; use gs://<bucket>/state/v2-reader-cursors.json or spanner://<project>/<instance>/<database>/MigrationControlPlane?namespace=v2-reader-cursors
+  lease_file: "" # optional; use gs://<bucket>/leases/v2.json or spanner://<project>/<instance>/<database>/MigrationControlPlane?namespace=v2-leases
+  progress_file: "" # optional; use gs://<bucket>/progress/v2-full-run.json or spanner://<project>/<instance>/<database>/MigrationControlPlane?namespace=v2-progress
+  run_id: "" # required when progress_file is set, for example full-20260313
+  release_gate_file: "" # optional; shared stage-rehearsal attestation store, for example gs://<bucket>/release-gates.json or spanner://<project>/<instance>/<database>/MigrationControlPlane?namespace=release-gates
+  release_gate_scope: "" # required when release_gate_file is set or stage rehearsal is enforced for prod
+  release_gate_max_age_hours: 72
+  require_stage_rehearsal_for_prod: false # when true, prod runs fail unless a fresh matching stage attestation exists
+  worker_id: "" # optional; defaults to <hostname>:<pid> or set MIGRATION_WORKER_ID
+  lease_duration_seconds: 120
+  heartbeat_interval_seconds: 30
   dlq_file_path: "state/v2_dead_letter.jsonl"
   flush_state_each_batch: true
   retry_attempts: 5
+  # retry_* also applies to reader-side resume after transient source stream failures
   retry_initial_delay_seconds: 0.5
   retry_max_delay_seconds: 15.0
   retry_backoff_multiplier: 2.0
@@ -44,6 +57,11 @@ jobs:
     source_query: "{}"
     incremental_field: "_ts"
     page_size: 500
+    shard_count: 1
+    shard_mode: "none" # none | client_hash | query_template
+    # For shard_mode=query_template, include {{SHARD_INDEX}} and/or {{SHARD_COUNT}}
+    # in source_query, for example:
+    # source_query: "{\"bucket\": {\"$mod\": [{{SHARD_COUNT}}, {{SHARD_INDEX}}]}}"
 
   - name: "cassandra_orders"
     api: "cassandra"
@@ -60,3 +78,7 @@ jobs:
     source_query: "SELECT * FROM orders WHERE updated_at >= %s ALLOW FILTERING"
     incremental_field: "updated_at"
     page_size: 500
+    shard_count: 1
+    shard_mode: "none" # none | client_hash | query_template
+    # query_template example:
+    # source_query: "SELECT * FROM orders WHERE MOD(shard_bucket, {{SHARD_COUNT}}) = {{SHARD_INDEX}} AND updated_at >= %s ALLOW FILTERING"

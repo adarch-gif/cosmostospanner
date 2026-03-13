@@ -1,11 +1,136 @@
 from __future__ import annotations
 
 import sys
+from datetime import UTC, datetime, timedelta
+import re
 from types import ModuleType
 
 import pytest
 
+from migration.resume import ReaderCursorStore, StreamResumeState
 from migration.state_store import WatermarkStore
+
+
+def _install_fake_spanner(monkeypatch: pytest.MonkeyPatch) -> None:
+    commit_timestamp = object()
+    store: dict[tuple[str, str, str], tuple] = {}
+    tick = {"count": 0}
+
+    class FakeKeySet:
+        def __init__(
+            self,
+            *,
+            keys: list[tuple[str, str]] | None = None,
+            all_: bool = False,
+        ) -> None:
+            self.keys = keys or []
+            self.all_ = all_
+
+    class _BaseReader:
+        def read(self, *, table: str, columns: list[str], keyset: FakeKeySet):
+            del columns
+            rows: list[tuple] = []
+            if keyset.all_:
+                for (row_table, _namespace, _record_key), row in store.items():
+                    if row_table == table:
+                        rows.append(row)
+                return rows
+            for namespace, record_key in keyset.keys:
+                row = store.get((table, namespace, record_key))
+                if row is not None:
+                    rows.append(row)
+            return rows
+
+        def execute_sql(self, *, sql: str, params: dict[str, object], param_types: dict[str, object]):
+            del param_types
+            match = re.search(r"FROM `([^`]+)`", sql)
+            assert match is not None
+            table = match.group(1)
+            namespace = str(params.get("namespace", ""))
+            rows: list[tuple] = []
+            for (row_table, row_namespace, _record_key), row in sorted(store.items()):
+                if row_table == table and row_namespace == namespace:
+                    rows.append(row)
+            return rows
+
+    class FakeSnapshot(_BaseReader):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            del exc_type, exc, tb
+            return False
+
+    class FakeTransaction(_BaseReader):
+        def insert_or_update(self, *, table: str, columns: list[str], values: list[tuple]) -> None:
+            del columns
+            for value in values:
+                namespace = str(value[0])
+                record_key = str(value[1])
+                payload_json = str(value[2])
+                status = str(value[3] or "")
+                owner_id = str(value[4] or "")
+                lease_expires_at = value[5]
+                updated_at = value[6]
+                if updated_at is commit_timestamp:
+                    tick["count"] += 1
+                    updated_at = datetime(2026, 3, 13, tzinfo=UTC) + timedelta(
+                        seconds=tick["count"]
+                    )
+                store[(table, namespace, record_key)] = (
+                    namespace,
+                    record_key,
+                    payload_json,
+                    status,
+                    owner_id,
+                    lease_expires_at,
+                    updated_at,
+                )
+
+        def delete(self, table: str, keyset: FakeKeySet) -> None:
+            for namespace, record_key in keyset.keys:
+                store.pop((table, namespace, record_key), None)
+
+    class FakeDatabase:
+        def snapshot(self) -> FakeSnapshot:
+            return FakeSnapshot()
+
+        def run_in_transaction(self, fn):
+            return fn(FakeTransaction())
+
+    class FakeInstance:
+        def database(self, database_name: str) -> FakeDatabase:
+            del database_name
+            return FakeDatabase()
+
+    class FakeSpannerClient:
+        def __init__(self, project: str) -> None:
+            self.project = project
+
+        def instance(self, instance_name: str) -> FakeInstance:
+            del instance_name
+            return FakeInstance()
+
+    google_module = sys.modules.get("google", ModuleType("google"))
+    cloud_module = ModuleType("google.cloud")
+    spanner_module = ModuleType("google.cloud.spanner")
+    spanner_v1_module = ModuleType("google.cloud.spanner_v1")
+    param_types_module = ModuleType("google.cloud.spanner_v1.param_types")
+
+    spanner_module.Client = FakeSpannerClient
+    spanner_module.COMMIT_TIMESTAMP = commit_timestamp
+    spanner_v1_module.KeySet = FakeKeySet
+    param_types_module.STRING = "STRING"
+    spanner_v1_module.param_types = param_types_module
+    cloud_module.spanner = spanner_module
+    cloud_module.spanner_v1 = spanner_v1_module
+    google_module.cloud = cloud_module
+
+    monkeypatch.setitem(sys.modules, "google", google_module)
+    monkeypatch.setitem(sys.modules, "google.cloud", cloud_module)
+    monkeypatch.setitem(sys.modules, "google.cloud.spanner", spanner_module)
+    monkeypatch.setitem(sys.modules, "google.cloud.spanner_v1", spanner_v1_module)
+    monkeypatch.setitem(sys.modules, "google.cloud.spanner_v1.param_types", param_types_module)
 
 
 def _install_fake_gcs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,3 +239,118 @@ def test_watermark_store_roundtrip_gcs(monkeypatch: pytest.MonkeyPatch) -> None:
     reloaded = WatermarkStore("gs://migration-state/watermarks.json")
     assert reloaded.get("users") == 123
     assert reloaded.get("orders") == 456
+
+
+def test_reader_cursor_store_roundtrip(tmp_path) -> None:
+    path = tmp_path / "reader-cursors.json"
+    store = ReaderCursorStore(str(path))
+    store.set(
+        "v1:users->Users",
+        StreamResumeState(
+            last_source_key="u2",
+            last_watermark=12,
+            emitted_count=2,
+            page_start_token="page-1",
+            scope="scope-a",
+            updated_at="2026-03-13T00:00:00+00:00",
+        ),
+    )
+    store.flush()
+
+    reloaded = ReaderCursorStore(str(path)).get("v1:users->Users")
+    assert reloaded.last_source_key == "u2"
+    assert reloaded.last_watermark == 12
+    assert reloaded.page_start_token == "page-1"
+    assert reloaded.scope == "scope-a"
+
+
+def test_reader_cursor_store_roundtrip_gcs(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_gcs(monkeypatch)
+
+    first = ReaderCursorStore("gs://migration-state/reader-cursors.json")
+    second = ReaderCursorStore("gs://migration-state/reader-cursors.json")
+
+    first.set(
+        "v1:users->Users",
+        StreamResumeState(
+            last_source_key="u1",
+            last_watermark=10,
+            emitted_count=1,
+            scope="scope-a",
+            updated_at="2026-03-13T00:00:00+00:00",
+        ),
+    )
+    second.set(
+        "v1:orders->Orders",
+        StreamResumeState(
+            last_source_key="o1",
+            last_watermark=20,
+            emitted_count=1,
+            scope="scope-b",
+            updated_at="2026-03-13T00:00:01+00:00",
+        ),
+    )
+
+    first.flush()
+    second.flush()
+
+    reloaded = ReaderCursorStore("gs://migration-state/reader-cursors.json")
+    assert reloaded.get("v1:users->Users").last_source_key == "u1"
+    assert reloaded.get("v1:orders->Orders").last_source_key == "o1"
+
+
+def test_reader_cursor_store_roundtrip_spanner(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_spanner(monkeypatch)
+
+    first = ReaderCursorStore(
+        "spanner://proj/inst/db/MigrationControlPlane?namespace=reader-cursors"
+    )
+    second = ReaderCursorStore(
+        "spanner://proj/inst/db/MigrationControlPlane?namespace=reader-cursors"
+    )
+
+    first.set(
+        "v1:users->Users",
+        StreamResumeState(
+            last_source_key="u1",
+            last_watermark=10,
+            emitted_count=1,
+            scope="scope-a",
+            updated_at="2026-03-13T00:00:00+00:00",
+        ),
+    )
+    second.set(
+        "v1:users->Users",
+        StreamResumeState(
+            last_source_key="u2",
+            last_watermark=20,
+            emitted_count=2,
+            scope="scope-a",
+            updated_at="2026-03-13T00:00:01+00:00",
+        ),
+    )
+
+    first.flush()
+    second.flush()
+
+    reloaded = ReaderCursorStore(
+        "spanner://proj/inst/db/MigrationControlPlane?namespace=reader-cursors"
+    )
+    record = reloaded.get("v1:users->Users")
+    assert record.last_source_key == "u2"
+    assert record.last_watermark == 20
+
+
+def test_watermark_store_roundtrip_spanner(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_spanner(monkeypatch)
+
+    first = WatermarkStore("spanner://proj/inst/db/MigrationControlPlane?namespace=v1-watermarks")
+    second = WatermarkStore("spanner://proj/inst/db/MigrationControlPlane?namespace=v1-watermarks")
+
+    first.set("users", 100)
+    second.set("users", 120)
+    first.flush()
+    second.flush()
+
+    reloaded = WatermarkStore("spanner://proj/inst/db/MigrationControlPlane?namespace=v1-watermarks")
+    assert reloaded.get("users") == 120

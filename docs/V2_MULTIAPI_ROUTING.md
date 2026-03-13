@@ -5,7 +5,7 @@
 The v2 pipeline is isolated from the existing SQL API path so routing requirements can evolve without destabilizing v1.
 
 v1 remains in `migration/` and `scripts/backfill.py`.
-v2 is implemented in `migration_v2/` and `scripts/v2_route_migrate.py`.
+v2 is implemented in `migration_v2/`, `scripts/v2_route_migrate.py`, and `scripts/v2_validate.py`.
 
 ## Supported source APIs
 
@@ -66,9 +66,22 @@ State artifacts:
 
 1. Watermarks: `runtime.state_file`
 2. Route registry: `runtime.route_registry_file`
+3. For large distributed runs, both can use `spanner://<project>/<instance>/<database>/<table>?namespace=<name>` to avoid whole-object registry/checkpoint state.
 3. Dead-letter records: `runtime.dlq_file_path`
 
 Use `gs://` paths for the watermark and route-registry objects when running shared or orchestrated jobs.
+
+## Routed validation
+
+Use `scripts/v2_validate.py` before cutover for routed jobs.
+
+The validator:
+
+1. Re-reads the selected source jobs in `full` mode.
+2. Recomputes the routed destination for each source record.
+3. Compares that expected routed state with the route registry.
+4. Streams Firestore and Spanner and compares the actual sink state with the expected routed state.
+5. Fails validation if it finds rejected source records, pending cleanup entries, missing/extra/mismatched registry rows, missing/extra/mismatched target rows, or sink metadata mismatches.
 
 ## Required Spanner table for v2
 

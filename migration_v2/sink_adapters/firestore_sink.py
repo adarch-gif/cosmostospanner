@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from typing import Iterable
 
 from migration.retry_utils import RetryPolicy, run_with_retry
 from migration_v2.config import FirestoreTargetConfig
-from migration_v2.models import CanonicalRecord
-from migration_v2.utils import stable_hash
+from migration_v2.models import CanonicalRecord, RoutedSinkRecord
+from migration_v2.utils import json_size_bytes, payload_checksum, stable_hash, to_jsonable
 
 LOGGER = logging.getLogger("v2.firestore_sink")
 
@@ -79,3 +80,32 @@ class FirestoreSinkAdapter:
             policy=self._retry_policy,
             logger=LOGGER,
         )
+
+    def iter_records(self) -> Iterable[RoutedSinkRecord]:
+        collection = self._client.collection(self._collection_name)
+        for snapshot in collection.stream():
+            raw = snapshot.to_dict() or {}
+            payload = to_jsonable(raw.get("payload", {}))
+            if not isinstance(payload, dict):
+                raise ValueError(
+                    f"Firestore document {snapshot.id} in {self._collection_name} has non-object payload."
+                )
+            computed_checksum = payload_checksum(payload)
+            computed_size = json_size_bytes(payload)
+            record = CanonicalRecord(
+                source_job=str(raw.get("sourceJob", "")),
+                source_api=str(raw.get("sourceApi", "")),
+                source_namespace=str(raw.get("sourceNamespace", "")),
+                source_key=str(raw.get("sourceKey", "")),
+                route_key=str(raw.get("routeKey", "")),
+                payload=payload,
+                payload_size_bytes=computed_size,
+                checksum=computed_checksum,
+                event_ts=str(raw.get("eventTs", "")),
+            )
+            yield RoutedSinkRecord(
+                destination="firestore",
+                record=record,
+                stored_checksum=str(raw.get("checksum", "")),
+                stored_payload_size_bytes=int(raw.get("payloadSizeBytes", computed_size)),
+            )

@@ -37,6 +37,7 @@ class RoutingConfig:
 
 @dataclass
 class RuntimeV2Config:
+    deployment_environment: str = "dev"
     mode: str = "full"  # full | incremental
     batch_size: int = 200
     dry_run: bool = False
@@ -52,6 +53,17 @@ class RuntimeV2Config:
     retry_backoff_multiplier: float = 2.0
     retry_jitter_seconds: float = 0.25
     max_records_per_job: dict[str, int | None] = field(default_factory=dict)
+    lease_file: str = ""
+    progress_file: str = ""
+    run_id: str = ""
+    worker_id: str = ""
+    lease_duration_seconds: int = 120
+    heartbeat_interval_seconds: int = 30
+    reader_cursor_state_file: str = ""
+    release_gate_file: str = ""
+    release_gate_scope: str = ""
+    release_gate_max_age_hours: int = 72
+    require_stage_rehearsal_for_prod: bool = False
 
 
 @dataclass
@@ -64,6 +76,8 @@ class BaseJobConfig:
     incremental_field: str | None = None
     enabled: bool = True
     page_size: int = 500
+    shard_count: int = 1
+    shard_mode: str = "none"  # none | client_hash | query_template
 
 
 @dataclass
@@ -158,6 +172,7 @@ def _parse_runtime(raw: dict[str, Any]) -> RuntimeV2Config:
         max_records_per_job[str(job_name)] = parsed if parsed > 0 else None
 
     runtime = RuntimeV2Config(
+        deployment_environment=str(runtime_raw.get("deployment_environment", "dev")).lower(),
         mode=str(runtime_raw.get("mode", "full")).lower(),
         batch_size=int(runtime_raw.get("batch_size", 200)),
         dry_run=_parse_bool(runtime_raw.get("dry_run", False), default=False),
@@ -180,8 +195,24 @@ def _parse_runtime(raw: dict[str, Any]) -> RuntimeV2Config:
         retry_backoff_multiplier=float(runtime_raw.get("retry_backoff_multiplier", 2.0)),
         retry_jitter_seconds=float(runtime_raw.get("retry_jitter_seconds", 0.25)),
         max_records_per_job=max_records_per_job,
+        lease_file=str(runtime_raw.get("lease_file", "")),
+        progress_file=str(runtime_raw.get("progress_file", "")),
+        run_id=str(runtime_raw.get("run_id", "")),
+        worker_id=str(runtime_raw.get("worker_id", os.getenv("MIGRATION_WORKER_ID", ""))),
+        lease_duration_seconds=int(runtime_raw.get("lease_duration_seconds", 120)),
+        heartbeat_interval_seconds=int(runtime_raw.get("heartbeat_interval_seconds", 30)),
+        reader_cursor_state_file=str(runtime_raw.get("reader_cursor_state_file", "")),
+        release_gate_file=str(runtime_raw.get("release_gate_file", "")),
+        release_gate_scope=str(runtime_raw.get("release_gate_scope", "")),
+        release_gate_max_age_hours=int(runtime_raw.get("release_gate_max_age_hours", 72)),
+        require_stage_rehearsal_for_prod=_parse_bool(
+            runtime_raw.get("require_stage_rehearsal_for_prod", False),
+            default=False,
+        ),
     )
 
+    if runtime.deployment_environment not in {"dev", "stage", "prod"}:
+        raise ValueError("runtime.deployment_environment must be one of: dev, stage, prod")
     if runtime.mode not in {"full", "incremental"}:
         raise ValueError("runtime.mode must be one of: full, incremental")
     if runtime.error_mode not in {"fail", "skip"}:
@@ -198,6 +229,37 @@ def _parse_runtime(raw: dict[str, Any]) -> RuntimeV2Config:
         raise ValueError("runtime.retry_backoff_multiplier must be >= 1")
     if runtime.retry_jitter_seconds < 0:
         raise ValueError("runtime.retry_jitter_seconds must be >= 0")
+    if runtime.lease_duration_seconds <= 0:
+        raise ValueError("runtime.lease_duration_seconds must be > 0")
+    if runtime.heartbeat_interval_seconds <= 0:
+        raise ValueError("runtime.heartbeat_interval_seconds must be > 0")
+    if runtime.lease_file and runtime.heartbeat_interval_seconds >= runtime.lease_duration_seconds:
+        raise ValueError(
+            "runtime.heartbeat_interval_seconds must be less than "
+            "runtime.lease_duration_seconds when runtime.lease_file is configured"
+        )
+    if runtime.progress_file and not runtime.run_id:
+        raise ValueError(
+            "runtime.run_id must be set when runtime.progress_file is configured"
+        )
+    if runtime.release_gate_file and not runtime.release_gate_scope:
+        raise ValueError(
+            "runtime.release_gate_scope must be set when runtime.release_gate_file is configured"
+        )
+    if runtime.release_gate_max_age_hours <= 0:
+        raise ValueError("runtime.release_gate_max_age_hours must be > 0")
+    if runtime.require_stage_rehearsal_for_prod and runtime.deployment_environment != "prod":
+        raise ValueError(
+            "runtime.require_stage_rehearsal_for_prod is only valid when runtime.deployment_environment=prod"
+        )
+    if runtime.require_stage_rehearsal_for_prod and not runtime.release_gate_file:
+        raise ValueError(
+            "runtime.release_gate_file must be configured when runtime.require_stage_rehearsal_for_prod is true"
+        )
+    if runtime.require_stage_rehearsal_for_prod and not runtime.release_gate_scope:
+        raise ValueError(
+            "runtime.release_gate_scope must be configured when runtime.require_stage_rehearsal_for_prod is true"
+        )
     return runtime
 
 
@@ -291,9 +353,21 @@ def _parse_jobs(raw: dict[str, Any]) -> list[MongoJobConfig | CassandraJobConfig
             "incremental_field": entry.get("incremental_field"),
             "enabled": _parse_bool(entry.get("enabled", True), default=True),
             "page_size": int(entry.get("page_size", 500)),
+            "shard_count": int(entry.get("shard_count", 1)),
+            "shard_mode": str(entry.get("shard_mode", "none")).lower(),
         }
         if common["page_size"] <= 0:
             raise ValueError(f"Job {job_name} page_size must be > 0")
+        if common["shard_count"] <= 0:
+            raise ValueError(f"Job {job_name} shard_count must be > 0")
+        if common["shard_mode"] not in {"none", "client_hash", "query_template"}:
+            raise ValueError(
+                f"Job {job_name} shard_mode must be one of: none, client_hash, query_template"
+            )
+        if common["shard_count"] > 1 and common["shard_mode"] == "none":
+            raise ValueError(
+                f"Job {job_name} sets shard_count > 1 but shard_mode is not configured."
+            )
 
         if api == "mongodb":
             connection_string = _string_from_env_or_value(entry, "connection_string")
@@ -360,6 +434,20 @@ def load_v2_config(path: str | Path) -> PipelineV2Config:
     firestore_target = _parse_firestore_target(raw)
     spanner_target = _parse_spanner_target(raw)
     jobs = _parse_jobs(raw)
+    route_namespaces: set[str] = set()
+    for job in jobs:
+        if job.route_namespace in route_namespaces:
+            raise ValueError(
+                f"Duplicate route_namespace detected across jobs: {job.route_namespace}"
+            )
+        route_namespaces.add(job.route_namespace)
+        if job.shard_mode == "query_template":
+            source_query = job.source_query or ""
+            if "{{SHARD_INDEX}}" not in source_query and "{{SHARD_COUNT}}" not in source_query:
+                raise ValueError(
+                    f"Job {job.name} uses shard_mode=query_template but source_query "
+                    "does not contain shard placeholders."
+                )
 
     return PipelineV2Config(
         runtime=runtime,

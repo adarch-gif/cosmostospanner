@@ -3,34 +3,125 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from migration.control_plane_backend import (
+    SpannerControlPlaneBackend,
+    is_spanner_control_plane_path,
+)
 from migration.json_state_backend import JsonStateBackend
+
+
+def _require_local_backend(backend: JsonStateBackend | None) -> JsonStateBackend:
+    if backend is None:
+        raise RuntimeError("Local JSON state backend is not configured for this store.")
+    return backend
 
 
 class JsonStateStore:
     def __init__(self, file_path: str) -> None:
-        self.backend = JsonStateBackend(file_path)
+        self.backend = (
+            None
+            if is_spanner_control_plane_path(file_path)
+            else JsonStateBackend(file_path)
+        )
+        self.spanner = (
+            SpannerControlPlaneBackend(file_path)
+            if is_spanner_control_plane_path(file_path)
+            else None
+        )
         self.data: dict[str, Any] = {}
+        self._dirty_keys: set[str] = set()
         self._load()
 
     def _read_file_data(self) -> dict[str, Any]:
-        return self.backend.read_json_object()
+        backend = _require_local_backend(self.backend)
+        return backend.read_json_object()
 
     def _normalize_data(self, raw: dict[str, Any]) -> dict[str, Any]:
         return dict(raw)
 
-    def _merge_data(self, current_data: dict[str, Any]) -> dict[str, Any]:
+    def _merge_pending_data(
+        self,
+        current_data: dict[str, Any],
+        candidate_data: dict[str, Any],
+    ) -> dict[str, Any]:
         merged = dict(current_data)
-        merged.update(self.data)
+        merged.update(candidate_data)
         return merged
 
     def _load(self) -> None:
-        self.data = self._normalize_data(self._read_file_data())
+        if self.spanner is not None:
+            self.data = {}
+        else:
+            self.data = self._normalize_data(self._read_file_data())
+        self._dirty_keys = set()
+
+    def _load_spanner_key(self, key: str) -> None:
+        if self.spanner is None or key in self.data:
+            return
+        row = self.spanner.get(key)
+        if row is not None and isinstance(row.payload, dict):
+            self.data[key] = self._normalize_data({key: row.payload}).get(key)
+
+    def _list_spanner_data(self) -> dict[str, Any]:
+        if self.spanner is None:
+            return {}
+        rows = self.spanner.list_namespace()
+        return self._normalize_data(
+            {
+                key: row.payload
+                for key, row in rows.items()
+                if isinstance(row.payload, dict)
+            }
+        )
 
     def flush(self) -> None:
-        def merge_fn(current_data: dict[str, Any]) -> dict[str, Any]:
-            return self._merge_data(self._normalize_data(current_data))
+        if self.spanner is not None:
+            dirty_keys = sorted(self._dirty_keys)
+            if not dirty_keys:
+                return
+            spanner_backend = self.spanner
+            persisted: dict[str, Any] = {}
 
-        self.data = self.backend.merge_write_json_object(merge_fn, ensure_ascii=False)
+            def txn_fn(transaction: Any) -> None:
+                current_rows = spanner_backend._read_records_with_reader(transaction, dirty_keys)
+                current_data = self._normalize_data(
+                    {
+                        key: row.payload
+                        for key, row in current_rows.items()
+                        if isinstance(row.payload, dict)
+                    }
+                )
+                candidate_data = self._normalize_data(
+                    {
+                        key: self.data[key]
+                        for key in dirty_keys
+                        if key in self.data
+                    }
+                )
+                merged = self._merge_pending_data(current_data, candidate_data)
+                for key, value in merged.items():
+                    spanner_backend.upsert(
+                        transaction,
+                        record_key=key,
+                        payload=value,
+                    )
+                persisted.update(merged)
+
+            spanner_backend.run_in_transaction(txn_fn)
+            self.data.update(persisted)
+            self._dirty_keys = set()
+            return
+
+        backend = _require_local_backend(self.backend)
+
+        def merge_fn(current_data: dict[str, Any]) -> dict[str, Any]:
+            return self._merge_pending_data(
+                self._normalize_data(current_data),
+                self.data,
+            )
+
+        self.data = backend.merge_write_json_object(merge_fn, ensure_ascii=False)
+        self._dirty_keys = set()
 
 
 @dataclass
@@ -94,11 +185,15 @@ class WatermarkStore(JsonStateStore):
             )
         return normalized
 
-    def _merge_data(self, current_data: dict[str, Any]) -> dict[str, Any]:
+    def _merge_pending_data(
+        self,
+        current_data: dict[str, Any],
+        candidate_data: dict[str, Any],
+    ) -> dict[str, Any]:
         merged = dict(current_data)
-        for job_name in set(current_data) | set(self.data):
+        for job_name in set(current_data) | set(candidate_data):
             current_checkpoint = self._deserialize_checkpoint(current_data.get(job_name))
-            candidate_checkpoint = self._deserialize_checkpoint(self.data.get(job_name))
+            candidate_checkpoint = self._deserialize_checkpoint(candidate_data.get(job_name))
             comparison = compare_watermark_values(
                 candidate_checkpoint.watermark,
                 current_checkpoint.watermark,
@@ -133,10 +228,12 @@ class WatermarkStore(JsonStateStore):
         self.set_checkpoint(job_name, WatermarkCheckpoint(watermark=value))
 
     def get_checkpoint(self, job_name: str) -> WatermarkCheckpoint:
+        self._load_spanner_key(job_name)
         return self._deserialize_checkpoint(self.data.get(job_name))
 
     def set_checkpoint(self, job_name: str, checkpoint: WatermarkCheckpoint) -> None:
         self.data[job_name] = self._serialize_checkpoint(checkpoint)
+        self._dirty_keys.add(job_name)
 
 
 SYNC_STATE_COMPLETE = "complete"
@@ -193,11 +290,15 @@ class RouteRegistryStore(JsonStateStore):
                 normalized[str(route_key)] = self._serialize_entry(entry)
         return normalized
 
-    def _merge_data(self, current_data: dict[str, Any]) -> dict[str, Any]:
+    def _merge_pending_data(
+        self,
+        current_data: dict[str, Any],
+        candidate_data: dict[str, Any],
+    ) -> dict[str, Any]:
         merged = dict(current_data)
-        for route_key in set(current_data) | set(self.data):
+        for route_key in set(current_data) | set(candidate_data):
             current_entry = self._deserialize_entry(current_data.get(route_key))
-            candidate_entry = self._deserialize_entry(self.data.get(route_key))
+            candidate_entry = self._deserialize_entry(candidate_data.get(route_key))
             if candidate_entry is None:
                 continue
             if current_entry is None or candidate_entry.updated_at >= current_entry.updated_at:
@@ -207,9 +308,31 @@ class RouteRegistryStore(JsonStateStore):
         return merged
 
     def get_entry(self, route_key: str) -> RouteRegistryEntry | None:
+        self._load_spanner_key(route_key)
         return self._deserialize_entry(self.data.get(route_key))
 
     def set_entry(self, route_key: str, entry: RouteRegistryEntry) -> None:
         if entry.sync_state not in VALID_SYNC_STATES:
             raise ValueError(f"Invalid registry sync_state: {entry.sync_state}")
         self.data[route_key] = self._serialize_entry(entry)
+        self._dirty_keys.add(route_key)
+
+    def items(self) -> list[tuple[str, RouteRegistryEntry]]:
+        if self.spanner is not None:
+            remote_data = self._list_spanner_data()
+            for dirty_key in self._dirty_keys:
+                if dirty_key in self.data:
+                    remote_data[dirty_key] = self.data[dirty_key]
+            spanner_items: list[tuple[str, RouteRegistryEntry]] = []
+            for route_key in sorted(remote_data):
+                entry = self._deserialize_entry(remote_data.get(route_key))
+                if entry is not None:
+                    spanner_items.append((route_key, entry))
+            return spanner_items
+
+        local_items: list[tuple[str, RouteRegistryEntry]] = []
+        for route_key in sorted(self.data):
+            entry = self._deserialize_entry(self.data.get(route_key))
+            if entry is not None:
+                local_items.append((route_key, entry))
+        return local_items

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
+from typing import Iterable
 
 from migration.retry_utils import RetryPolicy, run_with_retry
 from migration_v2.config import SpannerTargetConfig
-from migration_v2.models import CanonicalRecord
-from migration_v2.utils import json_dumps
+from migration_v2.models import CanonicalRecord, RoutedSinkRecord
+from migration_v2.utils import json_dumps, json_size_bytes, payload_checksum
 
 LOGGER = logging.getLogger("v2.spanner_sink")
 
@@ -160,3 +162,36 @@ class SpannerSinkAdapter:
             policy=self._retry_policy,
             logger=LOGGER,
         )
+
+    def iter_records(self) -> Iterable[RoutedSinkRecord]:
+        sql = (
+            f"SELECT RouteKey, SourceJob, SourceApi, SourceNamespace, SourceKey, "  # nosec B608
+            f"PayloadJson, PayloadSizeBytes, Checksum, EventTs FROM {self._table}"
+        )
+
+        with self._database.snapshot() as snapshot:
+            rows = snapshot.execute_sql(sql=sql)
+            for row in rows:
+                payload = json.loads(str(row[5]))
+                if not isinstance(payload, dict):
+                    raise ValueError(
+                        f"Spanner row {row[0]} in {self._table} has non-object payload."
+                    )
+                computed_checksum = payload_checksum(payload)
+                computed_size = json_size_bytes(payload)
+                yield RoutedSinkRecord(
+                    destination="spanner",
+                    record=CanonicalRecord(
+                        source_job=str(row[1]),
+                        source_api=str(row[2]),
+                        source_namespace=str(row[3]),
+                        source_key=str(row[4]),
+                        route_key=str(row[0]),
+                        payload=payload,
+                        payload_size_bytes=computed_size,
+                        checksum=computed_checksum,
+                        event_ts=str(row[8]),
+                    ),
+                    stored_checksum=str(row[7]),
+                    stored_payload_size_bytes=int(row[6]),
+                )
