@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
 from migration.config import MigrationConfig, TableMapping, load_config
 from migration.cosmos_reader import CosmosReader
 from migration.logging_utils import configure_logging
+from migration.reconciliation import aggregate_row_digests, row_digest
 from migration.retry_utils import RetryPolicy
 from migration.spanner_writer import SpannerWriter
 from migration.transform import transform_document
@@ -42,6 +43,12 @@ def parse_args() -> argparse.Namespace:
         default=True,
         help="Compare sampled row values in addition to key existence checks.",
     )
+    parser.add_argument(
+        "--reconciliation-mode",
+        choices=("sampled", "checksums"),
+        default="sampled",
+        help="Validation depth. 'sampled' is faster; 'checksums' performs a full row-level reconciliation.",
+    )
     return parser.parse_args()
 
 
@@ -58,6 +65,18 @@ def _normalize_value(value: Any) -> Any:
             value = value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc).isoformat()
     return value
+
+
+def _comparison_columns(mapping: TableMapping) -> list[str]:
+    selected_columns: list[str] = []
+    for column in mapping.key_columns:
+        if column not in selected_columns:
+            selected_columns.append(column)
+    compare_columns = mapping.validation_columns or [rule.target for rule in mapping.columns]
+    for column in [*compare_columns, *mapping.static_columns.keys()]:
+        if column not in selected_columns:
+            selected_columns.append(column)
+    return selected_columns
 
 
 def _collect_sample_rows(
@@ -125,7 +144,11 @@ def _validate_mapping(
     mapping: TableMapping,
     sample_size: int,
     compare_values: bool,
-) -> dict[str, int]:
+    reconciliation_mode: str,
+) -> dict[str, Any]:
+    if reconciliation_mode == "checksums":
+        return _validate_mapping_checksums(reader, writer, mapping)
+
     cosmos_count, count_transform_failures = _count_expected_rows(reader, mapping)
     spanner_count = writer.count_rows(mapping.target_table)
 
@@ -166,6 +189,7 @@ def _validate_mapping(
 
     total_transform_failures = count_transform_failures + sample_transform_failures
     return {
+        "reconciliation_mode": "sampled",
         "cosmos_count": cosmos_count,
         "spanner_count": spanner_count,
         "count_delta": spanner_count - cosmos_count,
@@ -173,7 +197,80 @@ def _validate_mapping(
         "sample_missing": missing,
         "sample_value_mismatch_rows": sample_value_mismatch_rows,
         "sample_value_mismatch_fields": sample_value_mismatch_fields,
+        "source_checksum": "",
+        "target_checksum": "",
+        "full_missing_rows": 0,
+        "full_extra_rows": 0,
+        "full_mismatched_rows": 0,
         "transform_failures": total_transform_failures,
+    }
+
+
+def _validate_mapping_checksums(
+    reader: CosmosReader,
+    writer: SpannerWriter,
+    mapping: TableMapping,
+) -> dict[str, Any]:
+    compare_columns = _comparison_columns(mapping)
+    source_hashes: dict[tuple[Any, ...], str] = {}
+    transform_failures = 0
+
+    for document in reader.iter_documents(
+        container_name=mapping.source_container,
+        query=mapping.source_query,
+        page_size=500,
+    ):
+        try:
+            transformed = transform_document(document, mapping)
+        except Exception as exc:  # noqa: BLE001
+            transform_failures += 1
+            LOGGER.warning(
+                "Checksum reconciliation transform failed for %s -> %s: %s",
+                mapping.source_container,
+                mapping.target_table,
+                exc,
+            )
+            continue
+        if transformed.is_delete:
+            continue
+        key_tuple = tuple(transformed.row[column] for column in mapping.key_columns)
+        source_hashes[key_tuple] = row_digest(transformed.row, compare_columns)
+
+    target_rows = writer.read_all_rows(
+        table=mapping.target_table,
+        key_columns=mapping.key_columns,
+        data_columns=compare_columns,
+    )
+    target_hashes = {
+        key_tuple: row_digest(row, compare_columns)
+        for key_tuple, row in target_rows.items()
+    }
+
+    source_keys = set(source_hashes)
+    target_keys = set(target_hashes)
+    missing_rows = len(source_keys.difference(target_keys))
+    extra_rows = len(target_keys.difference(source_keys))
+    mismatched_rows = sum(
+        1
+        for key_tuple in source_keys.intersection(target_keys)
+        if source_hashes[key_tuple] != target_hashes[key_tuple]
+    )
+
+    return {
+        "reconciliation_mode": "checksums",
+        "cosmos_count": len(source_hashes),
+        "spanner_count": len(target_hashes),
+        "count_delta": len(target_hashes) - len(source_hashes),
+        "sample_size": 0,
+        "sample_missing": 0,
+        "sample_value_mismatch_rows": 0,
+        "sample_value_mismatch_fields": 0,
+        "source_checksum": aggregate_row_digests(source_hashes),
+        "target_checksum": aggregate_row_digests(target_hashes),
+        "full_missing_rows": missing_rows,
+        "full_extra_rows": extra_rows,
+        "full_mismatched_rows": mismatched_rows,
+        "transform_failures": transform_failures,
     }
 
 
@@ -199,26 +296,54 @@ def main() -> int:
             mapping=mapping,
             sample_size=args.sample_size,
             compare_values=args.compare_values,
+            reconciliation_mode=args.reconciliation_mode,
         )
-        LOGGER.info(
-            "Validation %s -> %s | cosmos=%s spanner=%s delta=%s sample=%s missing=%s value_row_mismatch=%s value_field_mismatch=%s transform_failures=%s",
-            mapping.source_container,
-            mapping.target_table,
-            report["cosmos_count"],
-            report["spanner_count"],
-            report["count_delta"],
-            report["sample_size"],
-            report["sample_missing"],
-            report["sample_value_mismatch_rows"],
-            report["sample_value_mismatch_fields"],
-            report["transform_failures"],
-        )
-        if (
-            report["count_delta"] != 0
-            or report["sample_missing"] > 0
-            or report["sample_value_mismatch_rows"] > 0
-            or report["transform_failures"] > 0
-        ):
+        if report["reconciliation_mode"] == "checksums":
+            LOGGER.info(
+                "Validation %s -> %s | mode=checksums cosmos=%s spanner=%s delta=%s missing=%s extra=%s mismatched=%s transform_failures=%s source_checksum=%s target_checksum=%s",
+                mapping.source_container,
+                mapping.target_table,
+                report["cosmos_count"],
+                report["spanner_count"],
+                report["count_delta"],
+                report["full_missing_rows"],
+                report["full_extra_rows"],
+                report["full_mismatched_rows"],
+                report["transform_failures"],
+                report["source_checksum"],
+                report["target_checksum"],
+            )
+        else:
+            LOGGER.info(
+                "Validation %s -> %s | mode=sampled cosmos=%s spanner=%s delta=%s sample=%s missing=%s value_row_mismatch=%s value_field_mismatch=%s transform_failures=%s",
+                mapping.source_container,
+                mapping.target_table,
+                report["cosmos_count"],
+                report["spanner_count"],
+                report["count_delta"],
+                report["sample_size"],
+                report["sample_missing"],
+                report["sample_value_mismatch_rows"],
+                report["sample_value_mismatch_fields"],
+                report["transform_failures"],
+            )
+        if report["reconciliation_mode"] == "checksums":
+            has_mapping_failures = (
+                report["count_delta"] != 0
+                or report["full_missing_rows"] > 0
+                or report["full_extra_rows"] > 0
+                or report["full_mismatched_rows"] > 0
+                or report["transform_failures"] > 0
+                or report["source_checksum"] != report["target_checksum"]
+            )
+        else:
+            has_mapping_failures = (
+                report["count_delta"] != 0
+                or report["sample_missing"] > 0
+                or report["sample_value_mismatch_rows"] > 0
+                or report["transform_failures"] > 0
+            )
+        if has_mapping_failures:
             has_failures = True
 
     return 1 if has_failures else 0

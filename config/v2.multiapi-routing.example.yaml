@@ -4,8 +4,8 @@ runtime:
   dry_run: false
   log_level: "INFO"
   error_mode: "fail" # fail | skip
-  state_file: "state/v2_watermarks.json"
-  route_registry_file: "state/v2_route_registry.json"
+  state_file: "state/v2_watermarks.json" # or gs://<bucket>/state/v2_watermarks.json
+  route_registry_file: "state/v2_route_registry.json" # or gs://<bucket>/state/v2_route_registry.json
   dlq_file_path: "state/v2_dead_letter.jsonl"
   flush_state_each_batch: true
   retry_attempts: 5
@@ -18,7 +18,7 @@ runtime:
 
 routing:
   firestore_lt_bytes: 1048576 # < 1 MiB => Firestore
-  spanner_max_payload_bytes: 10485760
+  spanner_max_payload_bytes: 8388608 # safer cap below Spanner row ceiling
   payload_size_overhead_bytes: 2048
 
 targets:
@@ -57,6 +57,6 @@ jobs:
     table: "orders"
     route_namespace: "cassandra.appks.orders"
     key_fields: ["order_id"]
-    source_query: "SELECT * FROM orders WHERE updated_at > %s ALLOW FILTERING"
+    source_query: "SELECT * FROM orders WHERE updated_at >= %s ALLOW FILTERING"
     incremental_field: "updated_at"
     page_size: 500

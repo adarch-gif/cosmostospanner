@@ -9,7 +9,7 @@ This repository contains two migration solutions:
 1. **v1 pipeline**: Azure Cosmos DB SQL API -> Google Cloud Spanner
 2. **v2 pipeline**: Azure Cosmos DB MongoDB/Cassandra APIs -> dynamic routing:
    - payload `< 1 MB` -> Firestore
-   - payload `>= 1 MB` -> Spanner
+   - payload `>= 1 MB` -> Spanner up to a safer configured cap
 
 Both pipelines are configurable and production-oriented.
 
@@ -25,6 +25,7 @@ Both pipelines are configurable and production-oriented.
 8. `07_CODEBASE_STRUCTURE.md`
 9. `08_OPERATIONS_AND_SRE.md`
 10. `09_PRODUCTION_READINESS_REVIEW.md`
+11. `10_INTEGRATION_TESTING.md`
 
 ## Fastest path for first-time setup
 
@@ -36,4 +37,5 @@ Both pipelines are configurable and production-oriented.
    - v2: `04_V2_MULTIAPI_ROUTER_QUICKSTART.md`
 4. Review SRE and cutover guidance:
    - `08_OPERATIONS_AND_SRE.md`
-
+5. Run live-cloud preflight smoke tests before rehearsal/cutover:
+   - `10_INTEGRATION_TESTING.md`

@@ -63,7 +63,7 @@ Before migration, ensure Spanner tables/indexes exist and match mapping output:
 - Confirm credentials are loaded.
 - Confirm network path to Cosmos and Spanner.
 - Confirm Spanner write quota and expected throughput.
-- Confirm `watermark_state_file` path is writable.
+- Confirm `watermark_state_file` path is writable or points to a writable `gs://` object location.
 - Confirm `dlq_file_path` path is writable.
 
 Run automated preflight checks:
@@ -102,6 +102,12 @@ python .\scripts\backfill.py --config .\config\migration.yaml --container users
 
 ```powershell
 python .\scripts\validate.py --config .\config\migration.yaml --sample-size 200
+```
+
+For production cutover on critical datasets:
+
+```powershell
+python .\scripts\validate.py --config .\config\migration.yaml --reconciliation-mode checksums
 ```
 
 Interpretation:
@@ -152,7 +158,7 @@ Rollback steps:
 
 1. Route reads/writes back to Cosmos.
 2. Stop migration incrementals.
-3. Preserve logs, watermark file, and validation outputs for root cause analysis.
+3. Preserve logs, watermark state, and validation outputs for root cause analysis.
 4. Fix issue.
 5. Re-run targeted backfill/incremental and re-validate before next cutover.
 
@@ -170,7 +176,7 @@ Track these for each run:
 
 ## 13. Operational guardrails
 
-- Run only one writer job per mapping unless you add coordination.
+- Prefer `gs://` watermark state for shared or orchestrated runners.
 - Keep config under version control.
 - Treat watermark file as operational state (backup it).
 - Prefer `upsert` mode for rerunnable migrations.

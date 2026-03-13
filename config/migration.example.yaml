@@ -13,7 +13,7 @@ runtime:
   query_page_size: 200
   dry_run: false
   log_level: "INFO"
-  watermark_state_file: "state/watermarks.json"
+  watermark_state_file: "state/watermarks.json" # or gs://<bucket>/state/watermarks.json
   watermark_overlap_seconds: 5
   flush_watermark_each_mapping: true
   error_mode: "fail" # fail | skip

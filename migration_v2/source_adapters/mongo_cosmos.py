@@ -36,7 +36,7 @@ class MongoCosmosSourceAdapter:
         if mode == "incremental" and job.incremental_field:
             if watermark is not None:
                 query_filter = dict(query_filter)
-                query_filter[job.incremental_field] = {"$gt": watermark}
+                query_filter[job.incremental_field] = {"$gte": watermark}
 
         LOGGER.info(
             "Mongo source job %s query=%s mode=%s watermark=%s",

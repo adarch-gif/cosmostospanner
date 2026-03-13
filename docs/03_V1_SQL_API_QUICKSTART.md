@@ -17,6 +17,8 @@ Copy-Item .\config\migration.example.yaml .\config\migration.yaml
 
 Fill values in `config/migration.yaml`.
 
+For multi-runner or shared-runner operation, prefer a `gs://bucket/object.json` value for `runtime.watermark_state_file`.
+
 ## 3. Set required secrets/environment
 
 ```powershell
@@ -50,6 +52,12 @@ python .\scripts\backfill.py --config .\config\migration.yaml
 python .\scripts\validate.py --config .\config\migration.yaml --sample-size 200
 ```
 
+For production cutover validation, use full checksum reconciliation:
+
+```powershell
+python .\scripts\validate.py --config .\config\migration.yaml --reconciliation-mode checksums
+```
+
 ## 8. Incremental mode
 
 ```powershell
@@ -62,4 +70,4 @@ python .\scripts\backfill.py --config .\config\migration.yaml --incremental
 2. No critical errors in backfill logs
 3. Validation returns 0
 4. DLQ count is zero or investigated
-
+5. Checksum reconciliation passes before cutover when using high-assurance migrations

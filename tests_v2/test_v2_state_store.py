@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from migration_v2.state_store import RouteRegistryEntry, RouteRegistryStore
+from migration_v2.state_store import (
+    RouteRegistryEntry,
+    RouteRegistryStore,
+    WatermarkCheckpoint,
+    WatermarkStore,
+)
 
 
 def test_route_registry_store_roundtrip_with_sync_state(tmp_path) -> None:
@@ -33,3 +38,22 @@ def test_route_registry_store_rejects_corrupted_json(tmp_path) -> None:
     path.write_text("{bad json", encoding="utf-8")
     with pytest.raises(ValueError, match="corrupted"):
         RouteRegistryStore(str(path))
+
+
+def test_v2_watermark_store_roundtrip_checkpoint(tmp_path) -> None:
+    path = tmp_path / "watermarks.json"
+    store = WatermarkStore(str(path))
+    store.set_checkpoint(
+        "mongo_users",
+        WatermarkCheckpoint(
+            watermark=100,
+            route_keys=["job|1", "job|2"],
+            updated_at="2026-03-12T00:00:00+00:00",
+        ),
+    )
+    store.flush()
+
+    reloaded = WatermarkStore(str(path))
+    checkpoint = reloaded.get_checkpoint("mongo_users")
+    assert checkpoint.watermark == 100
+    assert checkpoint.route_keys == ["job|1", "job|2"]

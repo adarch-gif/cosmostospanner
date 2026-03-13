@@ -87,3 +87,36 @@ def test_load_v2_config_rejects_invalid_spanner_table(monkeypatch, tmp_path) -> 
     }
     with pytest.raises(ValueError, match="valid Spanner identifier"):
         load_v2_config(_write_config(tmp_path, data))
+
+
+def test_load_v2_config_rejects_unsafe_spanner_payload_limit(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COSMOS_MONGO_CONNECTION_STRING", "mongodb://example")
+    data = {
+        "runtime": {"mode": "full"},
+        "routing": {
+            "firestore_lt_bytes": 1_048_576,
+            "spanner_max_payload_bytes": 10_485_760,
+        },
+        "targets": {
+            "firestore": {"project": "proj"},
+            "spanner": {
+                "project": "proj",
+                "instance": "inst",
+                "database": "db",
+                "table": "RoutedDocuments",
+            },
+        },
+        "jobs": [
+            {
+                "name": "mongo_users",
+                "api": "mongodb",
+                "connection_string_env": "COSMOS_MONGO_CONNECTION_STRING",
+                "database": "appdb",
+                "collection": "users",
+                "route_namespace": "mongodb.appdb.users",
+                "key_fields": ["id"],
+            }
+        ],
+    }
+    with pytest.raises(ValueError, match="safe recommended limit"):
+        load_v2_config(_write_config(tmp_path, data))

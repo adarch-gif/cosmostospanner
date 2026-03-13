@@ -34,7 +34,7 @@ Validation rule:
 - `query_page_size` (default `200`, must be `> 0`): max documents returned per Cosmos page.
 - `dry_run` (default `false`): if true, no Spanner writes are executed.
 - `log_level` (default `INFO`): `DEBUG`, `INFO`, `WARNING`, `ERROR`.
-- `watermark_state_file` (default `state/watermarks.json`): local watermark JSON file path.
+- `watermark_state_file` (default `state/watermarks.json`): watermark JSON path. Supports local files and `gs://bucket/object`.
 - `watermark_overlap_seconds` (default `5`, must be `>= 0`): overlap window for incremental reads.
 - `flush_watermark_each_mapping` (default `true`): flush watermark file after each mapping in incremental mode.
 - `error_mode` (default `fail`): `fail` or `skip`.
@@ -63,6 +63,7 @@ Each mapping defines one Cosmos container to one Spanner table migration.
 - `delete_rule` (optional): converts matching documents into delete operations.
 - `validation_columns` (optional): explicit column list for value comparison in validation.
   - If omitted, validation compares columns from `columns` mapping rules.
+  - Full checksum reconciliation also uses these columns when present.
 
 Validation rules:
 

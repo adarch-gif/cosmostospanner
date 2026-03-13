@@ -15,7 +15,7 @@
 2. Apply configured field mapping + converters
 3. Upsert/delete into Spanner
 4. Persist watermark state (incremental mode)
-5. Validate counts, key existence, and sampled values
+5. Validate with either sampled checks or full checksum reconciliation
 
 ### Reliability controls
 
@@ -40,17 +40,18 @@
 1. Source adapter yields canonical record
 2. Router computes destination using payload size rule
 3. Destination sink upsert
-4. If destination changed, old sink delete
-5. Route registry update
-6. Incremental watermark update
+4. If destination changed, registry is marked `pending_cleanup`
+5. Old sink delete is attempted
+6. Incremental watermark update advances only on successful records
 
 ### Move semantics
 
 If a record previously in Firestore grows beyond threshold, pipeline:
 
 1. Writes record to Spanner
-2. Deletes record from Firestore
-3. Updates route registry
+2. Marks move intent in the route registry
+3. Deletes record from Firestore
+4. Finalizes route registry state
 
 This avoids dual-active copies as the intended steady state.
 
@@ -63,11 +64,10 @@ Managed via Terraform:
 3. Secret Manager secret containers
 4. Spanner infrastructure
 5. Firestore DB (v2)
-6. Optional state bucket
+6. Optional state bucket for `gs://` watermark and route-registry storage
 
 Environment wrappers:
 
 - `infra/terraform/envs/dev`
 - `infra/terraform/envs/stage`
 - `infra/terraform/envs/prod`
-

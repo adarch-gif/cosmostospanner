@@ -17,6 +17,8 @@ Copy-Item .\config\v2.multiapi-routing.example.yaml .\config\v2.multiapi-routing
 
 Fill values in `config/v2.multiapi-routing.yaml`.
 
+For shared runners, prefer `gs://bucket/object.json` for `runtime.state_file` and `runtime.route_registry_file`.
+
 ## 3. Set required environment variables
 
 ```powershell
@@ -51,6 +53,8 @@ python .\scripts\v2_route_migrate.py --config .\config\v2.multiapi-routing.yaml
 python .\scripts\v2_route_migrate.py --config .\config\v2.multiapi-routing.yaml --incremental
 ```
 
+Incremental v2 runs now replay inclusively from the last watermark and deduplicate by `route_key` at the watermark boundary. This is intentional and reduces missed-record risk.
+
 ## 8. Optional job-scoped execution
 
 ```powershell
@@ -62,4 +66,4 @@ python .\scripts\v2_route_migrate.py --config .\config\v2.multiapi-routing.yaml 
 1. `runtime.state_file` (watermarks)
 2. `runtime.route_registry_file` (destination map)
 3. `runtime.dlq_file_path` (rejected/failed records when skip mode enabled)
-
+4. Default Spanner routing ceiling is `8 MiB`; records above that are rejected or DLQ'd based on `error_mode`

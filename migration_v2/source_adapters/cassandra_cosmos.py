@@ -38,6 +38,7 @@ class CassandraCosmosSourceAdapter:
         try:
             session.set_keyspace(job.keyspace)
 
+            # Table and incremental-field identifiers are validated during config loading.
             query = job.source_query or f"SELECT * FROM {job.table}"  # nosec B608
             params = None
             if mode == "incremental" and job.incremental_field:
@@ -46,7 +47,7 @@ class CassandraCosmosSourceAdapter:
                         params = (watermark,)
                     elif not job.source_query:
                         query = (
-                            f"SELECT * FROM {job.table} WHERE {job.incremental_field} > %s "  # nosec B608
+                            f"SELECT * FROM {job.table} WHERE {job.incremental_field} >= %s "  # nosec B608
                             "ALLOW FILTERING"
                         )
                         params = (watermark,)

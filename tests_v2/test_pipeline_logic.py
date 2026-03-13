@@ -11,6 +11,8 @@ from migration_v2.state_store import (
     SYNC_STATE_PENDING_CLEANUP,
     RouteRegistryEntry,
     RouteRegistryStore,
+    WatermarkCheckpoint,
+    WatermarkStore,
 )
 
 
@@ -19,8 +21,12 @@ class _FakeSink:
         self.upserts: list[str] = []
         self.deletes: list[str] = []
         self.fail_delete_count = 0
+        self.fail_upsert_count = 0
 
     def upsert(self, record: CanonicalRecord) -> None:
+        if self.fail_upsert_count > 0:
+            self.fail_upsert_count -= 1
+            raise RuntimeError("simulated upsert failure")
         self.upserts.append(record.route_key)
 
     def delete(self, record: CanonicalRecord) -> None:
@@ -203,3 +209,165 @@ def test_apply_route_reconciles_pending_cleanup_then_skips_unchanged(tmp_path) -
     assert stats.moved_records == 1
     assert stats.unchanged_skipped == 1
     assert pipeline.spanner_sink.upserts == []
+
+
+def test_run_incremental_skips_checkpointed_records_and_advances_checkpoint(tmp_path) -> None:
+    job = MongoJobConfig(
+        name="mongo_users",
+        api="mongodb",
+        route_namespace="mongodb.appdb.users",
+        key_fields=["id"],
+        connection_string="mongodb://x",
+        database="appdb",
+        collection="users",
+    )
+    pipeline = V2MigrationPipeline.__new__(V2MigrationPipeline)
+    pipeline.config = SimpleNamespace(
+        runtime=SimpleNamespace(
+            error_mode="fail",
+            mode="incremental",
+            flush_state_each_batch=True,
+            batch_size=10,
+            max_records_per_job={},
+        ),
+        jobs=[job],
+    )
+    pipeline.router = SizeRouter(
+        RoutingConfig(
+            firestore_lt_bytes=1000,
+            spanner_max_payload_bytes=10_000,
+            payload_size_overhead_bytes=0,
+        )
+    )
+    pipeline.registry = RouteRegistryStore(str(tmp_path / "registry.json"))
+    pipeline.watermarks = WatermarkStore(str(tmp_path / "watermarks.json"))
+    pipeline.watermarks.set_checkpoint(
+        job.name,
+        WatermarkCheckpoint(
+            watermark=100,
+            route_keys=["mongodb.appdb.users|1"],
+            updated_at="2026-03-12T00:00:00+00:00",
+        ),
+    )
+    pipeline.watermarks.flush()
+    pipeline.dead_letter = SimpleNamespace(write=lambda **_: None)
+    pipeline.firestore_sink = _FakeSink()
+    pipeline.spanner_sink = _FakeSink()
+    pipeline._source_iter = lambda *_args, **_kwargs: iter(
+        [
+            _record(size=500, checksum="c1"),
+            CanonicalRecord(
+                source_job="mongo_users",
+                source_api="mongodb",
+                source_namespace="mongodb.appdb.users",
+                source_key="2",
+                route_key="mongodb.appdb.users|2",
+                payload={"id": "2"},
+                payload_size_bytes=500,
+                checksum="c2",
+                event_ts="2026-03-12T00:00:00+00:00",
+                watermark_value=100,
+            ),
+            CanonicalRecord(
+                source_job="mongo_users",
+                source_api="mongodb",
+                source_namespace="mongodb.appdb.users",
+                source_key="3",
+                route_key="mongodb.appdb.users|3",
+                payload={"id": "3"},
+                payload_size_bytes=500,
+                checksum="c3",
+                event_ts="2026-03-12T00:00:01+00:00",
+                watermark_value=101,
+            ),
+        ]
+    )
+
+    stats_by_job = pipeline.run()
+    stats = stats_by_job[job.name]
+    checkpoint = pipeline.watermarks.get_checkpoint(job.name)
+
+    assert stats.checkpoint_skipped == 1
+    assert checkpoint.watermark == 101
+    assert checkpoint.route_keys == ["mongodb.appdb.users|3"]
+
+
+def test_run_incremental_holds_checkpoint_when_failures_occur(tmp_path) -> None:
+    job = MongoJobConfig(
+        name="mongo_users",
+        api="mongodb",
+        route_namespace="mongodb.appdb.users",
+        key_fields=["id"],
+        connection_string="mongodb://x",
+        database="appdb",
+        collection="users",
+    )
+    pipeline = V2MigrationPipeline.__new__(V2MigrationPipeline)
+    pipeline.config = SimpleNamespace(
+        runtime=SimpleNamespace(
+            error_mode="skip",
+            mode="incremental",
+            flush_state_each_batch=True,
+            batch_size=10,
+            max_records_per_job={},
+        ),
+        jobs=[job],
+    )
+    pipeline.router = SizeRouter(
+        RoutingConfig(
+            firestore_lt_bytes=1000,
+            spanner_max_payload_bytes=10_000,
+            payload_size_overhead_bytes=0,
+        )
+    )
+    pipeline.registry = RouteRegistryStore(str(tmp_path / "registry.json"))
+    pipeline.watermarks = WatermarkStore(str(tmp_path / "watermarks.json"))
+    pipeline.watermarks.set_checkpoint(
+        job.name,
+        WatermarkCheckpoint(
+            watermark=100,
+            route_keys=["mongodb.appdb.users|1"],
+            updated_at="2026-03-12T00:00:00+00:00",
+        ),
+    )
+    pipeline.watermarks.flush()
+    pipeline.dead_letter = SimpleNamespace(write=lambda **_: None)
+    pipeline.firestore_sink = _FakeSink()
+    pipeline.spanner_sink = _FakeSink()
+    pipeline.firestore_sink.fail_upsert_count = 1
+    pipeline._source_iter = lambda *_args, **_kwargs: iter(
+        [
+            CanonicalRecord(
+                source_job="mongo_users",
+                source_api="mongodb",
+                source_namespace="mongodb.appdb.users",
+                source_key="2",
+                route_key="mongodb.appdb.users|2",
+                payload={"id": "2"},
+                payload_size_bytes=500,
+                checksum="c2",
+                event_ts="2026-03-12T00:00:00+00:00",
+                watermark_value=100,
+            ),
+            CanonicalRecord(
+                source_job="mongo_users",
+                source_api="mongodb",
+                source_namespace="mongodb.appdb.users",
+                source_key="3",
+                route_key="mongodb.appdb.users|3",
+                payload={"id": "3"},
+                payload_size_bytes=500,
+                checksum="c3",
+                event_ts="2026-03-12T00:00:01+00:00",
+                watermark_value=101,
+            ),
+        ]
+    )
+
+    stats_by_job = pipeline.run()
+    stats = stats_by_job[job.name]
+    checkpoint = pipeline.watermarks.get_checkpoint(job.name)
+
+    assert stats.failed_records == 1
+    assert checkpoint.watermark == 100
+    assert checkpoint.route_keys == ["mongodb.appdb.users|1"]

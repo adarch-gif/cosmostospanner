@@ -26,7 +26,8 @@ Provide reusable, repeatable, and auditable migration toolchains from Azure Cosm
 2. **Config-first**: behavior is driven by YAML.
 3. **Idempotent writes**: reruns are safe.
 4. **Operational safety**: preflight checks, retries, DLQ, state files.
-5. **Infrastructure reproducibility**: Terraform stacks and environment wrappers.
+5. **Replay-safe incrementals**: success-aware checkpoints with overlap/dedup semantics.
+6. **Infrastructure reproducibility**: Terraform stacks and environment wrappers.
 
 ## High-level runtime components
 
@@ -37,4 +38,4 @@ Provide reusable, repeatable, and auditable migration toolchains from Azure Cosm
 5. State and route registry
 6. Validation and preflight checks
 7. Terraform-managed cloud resources
-
+8. Optional live-cloud integration test harness

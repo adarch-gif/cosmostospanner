@@ -77,17 +77,18 @@ def _query_for_mapping(
 def _flush_upserts(
     writer: SpannerWriter,
     mapping: TableMapping,
-    buffer: list[dict[str, Any]],
+    buffer: list[TransformOutput],
     counters: dict[str, int],
     *,
     error_mode: str,
     dead_letter: DeadLetterSink,
-) -> None:
+) -> int:
     if not buffer:
-        return
+        return 0
+    rows = [item.row for item in buffer]
     try:
-        counters["rows_upserted"] += writer.write_rows(mapping.target_table, buffer, mapping.mode)
-        return
+        counters["rows_upserted"] += writer.write_rows(mapping.target_table, rows, mapping.mode)
+        return max(item.source_ts for item in buffer)
     except Exception as exc:  # noqa: BLE001
         if error_mode != "skip":
             raise
@@ -97,13 +98,15 @@ def _flush_upserts(
             mapping.target_table,
             exc,
         )
-        for row in buffer:
+        max_success_ts = 0
+        for item in buffer:
             try:
                 counters["rows_upserted"] += writer.write_rows(
                     mapping.target_table,
-                    [row],
+                    [item.row],
                     mapping.mode,
                 )
+                max_success_ts = max(max_success_ts, item.source_ts)
             except Exception as row_exc:  # noqa: BLE001
                 counters["rows_failed"] += 1
                 dead_letter.write(
@@ -112,8 +115,9 @@ def _flush_upserts(
                     source_container=mapping.source_container,
                     target_table=mapping.target_table,
                     error=row_exc,
-                    transformed_row=row,
+                    transformed_row=item.row,
                 )
+        return max_success_ts
     finally:
         buffer.clear()
 
@@ -121,17 +125,22 @@ def _flush_upserts(
 def _flush_deletes(
     writer: SpannerWriter,
     mapping: TableMapping,
-    buffer: list[dict[str, Any]],
+    buffer: list[TransformOutput],
     counters: dict[str, int],
     *,
     error_mode: str,
     dead_letter: DeadLetterSink,
-) -> None:
+) -> int:
     if not buffer:
-        return
+        return 0
+    key_rows = [item.row for item in buffer]
     try:
-        counters["rows_deleted"] += writer.delete_rows(mapping.target_table, mapping.key_columns, buffer)
-        return
+        counters["rows_deleted"] += writer.delete_rows(
+            mapping.target_table,
+            mapping.key_columns,
+            key_rows,
+        )
+        return max(item.source_ts for item in buffer)
     except Exception as exc:  # noqa: BLE001
         if error_mode != "skip":
             raise
@@ -141,13 +150,15 @@ def _flush_deletes(
             mapping.target_table,
             exc,
         )
-        for key_row in buffer:
+        max_success_ts = 0
+        for item in buffer:
             try:
                 counters["rows_deleted"] += writer.delete_rows(
                     mapping.target_table,
                     mapping.key_columns,
-                    [key_row],
+                    [item.row],
                 )
+                max_success_ts = max(max_success_ts, item.source_ts)
             except Exception as row_exc:  # noqa: BLE001
                 counters["rows_failed"] += 1
                 dead_letter.write(
@@ -156,8 +167,9 @@ def _flush_deletes(
                     source_container=mapping.source_container,
                     target_table=mapping.target_table,
                     error=row_exc,
-                    transformed_row=key_row,
+                    transformed_row=item.row,
                 )
+        return max_success_ts
     finally:
         buffer.clear()
 
@@ -179,9 +191,10 @@ def _process_mapping(
         "rows_failed": 0,
         "docs_failed": 0,
         "max_ts_seen": 0,
+        "max_success_ts": 0,
     }
-    upsert_buffer: list[dict[str, Any]] = []
-    delete_buffer: list[dict[str, Any]] = []
+    upsert_buffer: list[TransformOutput] = []
+    delete_buffer: list[TransformOutput] = []
 
     last_watermark = since_ts if since_ts is not None else watermarks.get(mapping.source_container, 0)
     query, params = _query_for_mapping(
@@ -209,6 +222,7 @@ def _process_mapping(
         max_docs=max_docs,
     ):
         counters["docs_seen"] += 1
+        counters["max_ts_seen"] = max(counters["max_ts_seen"], int(document.get("_ts", 0) or 0))
         try:
             result: TransformOutput = transform_document(document, mapping)
         except Exception as exc:  # noqa: BLE001
@@ -230,51 +244,72 @@ def _process_mapping(
                 continue
             raise
 
-        counters["max_ts_seen"] = max(counters["max_ts_seen"], result.source_ts)
         if result.is_delete:
-            delete_buffer.append(result.row)
+            delete_buffer.append(result)
             if len(delete_buffer) >= config.runtime.batch_size:
-                _flush_deletes(
-                    writer,
-                    mapping,
-                    delete_buffer,
-                    counters,
-                    error_mode=config.runtime.error_mode,
-                    dead_letter=dead_letter,
+                counters["max_success_ts"] = max(
+                    counters["max_success_ts"],
+                    _flush_deletes(
+                        writer,
+                        mapping,
+                        delete_buffer,
+                        counters,
+                        error_mode=config.runtime.error_mode,
+                        dead_letter=dead_letter,
+                    ),
                 )
         else:
-            upsert_buffer.append(result.row)
+            upsert_buffer.append(result)
             if len(upsert_buffer) >= config.runtime.batch_size:
-                _flush_upserts(
-                    writer,
-                    mapping,
-                    upsert_buffer,
-                    counters,
-                    error_mode=config.runtime.error_mode,
-                    dead_letter=dead_letter,
+                counters["max_success_ts"] = max(
+                    counters["max_success_ts"],
+                    _flush_upserts(
+                        writer,
+                        mapping,
+                        upsert_buffer,
+                        counters,
+                        error_mode=config.runtime.error_mode,
+                        dead_letter=dead_letter,
+                    ),
                 )
 
-    _flush_upserts(
-        writer,
-        mapping,
-        upsert_buffer,
-        counters,
-        error_mode=config.runtime.error_mode,
-        dead_letter=dead_letter,
+    counters["max_success_ts"] = max(
+        counters["max_success_ts"],
+        _flush_upserts(
+            writer,
+            mapping,
+            upsert_buffer,
+            counters,
+            error_mode=config.runtime.error_mode,
+            dead_letter=dead_letter,
+        ),
     )
-    _flush_deletes(
-        writer,
-        mapping,
-        delete_buffer,
-        counters,
-        error_mode=config.runtime.error_mode,
-        dead_letter=dead_letter,
+    counters["max_success_ts"] = max(
+        counters["max_success_ts"],
+        _flush_deletes(
+            writer,
+            mapping,
+            delete_buffer,
+            counters,
+            error_mode=config.runtime.error_mode,
+            dead_letter=dead_letter,
+        ),
     )
 
-    if incremental and counters["max_ts_seen"] > 0:
-        watermarks.set(mapping.source_container, counters["max_ts_seen"])
-        if config.runtime.flush_watermark_each_mapping:
-            watermarks.flush()
+    if incremental and counters["max_success_ts"] > 0:
+        if counters["rows_failed"] > 0 or counters["docs_failed"] > 0:
+            LOGGER.warning(
+                "Checkpoint not advanced for %s -> %s because failures occurred "
+                "(row_failures=%s doc_failures=%s).",
+                mapping.source_container,
+                mapping.target_table,
+                counters["rows_failed"],
+                counters["docs_failed"],
+            )
+        else:
+            watermarks.set(mapping.source_container, counters["max_success_ts"])
+            if config.runtime.flush_watermark_each_mapping:
+                watermarks.flush()
     return counters
 
 
@@ -310,7 +345,7 @@ def main() -> int:
                 since_ts=args.since_ts,
             )
             LOGGER.info(
-                "Completed %s -> %s | docs_seen=%s upserted=%s deleted=%s row_failures=%s doc_failures=%s max_ts=%s",
+                "Completed %s -> %s | docs_seen=%s upserted=%s deleted=%s row_failures=%s doc_failures=%s max_ts=%s max_success_ts=%s",
                 mapping.source_container,
                 mapping.target_table,
                 stats["docs_seen"],
@@ -319,6 +354,7 @@ def main() -> int:
                 stats["rows_failed"],
                 stats["docs_failed"],
                 stats["max_ts_seen"],
+                stats["max_success_ts"],
             )
         except Exception as exc:  # noqa: BLE001
             LOGGER.exception(

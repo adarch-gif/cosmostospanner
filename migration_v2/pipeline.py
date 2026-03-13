@@ -22,7 +22,9 @@ from migration_v2.state_store import (
     SYNC_STATE_PENDING_CLEANUP,
     RouteRegistryEntry,
     RouteRegistryStore,
+    WatermarkCheckpoint,
     WatermarkStore,
+    compare_watermark_values,
 )
 
 LOGGER = logging.getLogger("v2.pipeline")
@@ -35,6 +37,8 @@ class JobStats:
     spanner_writes: int = 0
     moved_records: int = 0
     unchanged_skipped: int = 0
+    checkpoint_skipped: int = 0
+    out_of_order_records: int = 0
     rejected_records: int = 0
     failed_records: int = 0
     cleanup_failed: int = 0
@@ -95,14 +99,50 @@ class V2MigrationPipeline:
         )
 
     def _is_newer_watermark(self, candidate: Any, current: Any) -> bool:
-        if candidate is None:
+        return compare_watermark_values(candidate, current) > 0
+
+    def _checkpoint_contains(
+        self,
+        checkpoint: WatermarkCheckpoint,
+        record: CanonicalRecord,
+    ) -> bool:
+        if checkpoint.watermark is None or record.watermark_value is None:
             return False
-        if current is None:
+        comparison = compare_watermark_values(record.watermark_value, checkpoint.watermark)
+        if comparison < 0:
             return True
-        try:
-            return candidate > current
-        except TypeError:
-            return str(candidate) > str(current)
+        if comparison == 0 and record.route_key in checkpoint.route_keys:
+            return True
+        return False
+
+    def _advance_checkpoint(
+        self,
+        checkpoint: WatermarkCheckpoint,
+        record: CanonicalRecord,
+    ) -> WatermarkCheckpoint:
+        if record.watermark_value is None:
+            return checkpoint
+        if checkpoint.watermark is None:
+            return WatermarkCheckpoint(
+                watermark=record.watermark_value,
+                route_keys=[record.route_key],
+                updated_at=utc_now_iso(),
+            )
+        comparison = compare_watermark_values(record.watermark_value, checkpoint.watermark)
+        if comparison > 0:
+            return WatermarkCheckpoint(
+                watermark=record.watermark_value,
+                route_keys=[record.route_key],
+                updated_at=utc_now_iso(),
+            )
+        if comparison == 0:
+            route_keys = sorted(set(checkpoint.route_keys) | {record.route_key})
+            return WatermarkCheckpoint(
+                watermark=checkpoint.watermark,
+                route_keys=route_keys,
+                updated_at=utc_now_iso(),
+            )
+        return checkpoint
 
     def _write_dead_letter(
         self,
@@ -196,7 +236,7 @@ class V2MigrationPipeline:
         job: MongoJobConfig | CassandraJobConfig,
         record: CanonicalRecord,
         stats: JobStats,
-    ) -> None:
+    ) -> bool:
         decision = self.router.decide(record.payload_size_bytes)
         if decision.destination == RouteDestination.REJECT:
             stats.rejected_records += 1
@@ -211,14 +251,14 @@ class V2MigrationPipeline:
                     error=error,
                     record=record,
                 )
-                return
+                return False
             raise error
 
         previous = self.registry.get_entry(record.route_key)
         if previous and previous.sync_state == SYNC_STATE_PENDING_CLEANUP:
             cleanup_ok = self._finalize_pending_cleanup(job, record, previous, stats)
             if not cleanup_ok:
-                return
+                return False
             previous = self.registry.get_entry(record.route_key)
 
         new_destination = decision.destination.value
@@ -229,7 +269,7 @@ class V2MigrationPipeline:
             and previous.checksum == record.checksum
         ):
             stats.unchanged_skipped += 1
-            return
+            return True
 
         destination_sink = self._sink_for_destination(new_destination)
         old_sink = None
@@ -250,7 +290,7 @@ class V2MigrationPipeline:
                     error=exc,
                     record=record,
                 )
-                return
+                return False
             raise
 
         if decision.destination == RouteDestination.FIRESTORE:
@@ -285,7 +325,7 @@ class V2MigrationPipeline:
                         error=exc,
                         record=record,
                     )
-                    return
+                    return False
                 raise
 
         self.registry.set_entry(
@@ -301,6 +341,7 @@ class V2MigrationPipeline:
         )
         if old_sink:
             self.registry.flush()
+        return True
 
     def run(self, *, job_names: list[str] | None = None) -> dict[str, JobStats]:
         jobs = self._selected_jobs(job_names)
@@ -309,49 +350,91 @@ class V2MigrationPipeline:
 
         all_stats: dict[str, JobStats] = {}
         for job in jobs:
-            watermark = (
-                self.watermarks.get(job.name)
+            stored_checkpoint = (
+                self.watermarks.get_checkpoint(job.name)
                 if self.config.runtime.mode == "incremental"
-                else None
+                else WatermarkCheckpoint()
             )
             max_records = self.config.runtime.max_records_per_job.get(job.name)
-            stats = JobStats(max_watermark=watermark)
+            stats = JobStats(max_watermark=stored_checkpoint.watermark)
+            candidate_checkpoint = WatermarkCheckpoint(
+                watermark=stored_checkpoint.watermark,
+                route_keys=list(stored_checkpoint.route_keys),
+                updated_at=stored_checkpoint.updated_at,
+            )
+            checkpoint_blocked = False
+            last_seen_watermark = stored_checkpoint.watermark
             LOGGER.info(
                 "Starting v2 job %s api=%s mode=%s watermark=%s",
                 job.name,
                 job.api,
                 self.config.runtime.mode,
-                watermark,
+                stored_checkpoint.watermark,
             )
-            for record in self._source_iter(job, watermark=watermark, max_records=max_records):
+            for record in self._source_iter(
+                job,
+                watermark=stored_checkpoint.watermark,
+                max_records=max_records,
+            ):
                 stats.docs_seen += 1
-                self._apply_route(job, record, stats)
+                if self.config.runtime.mode == "incremental":
+                    if self._checkpoint_contains(stored_checkpoint, record):
+                        stats.checkpoint_skipped += 1
+                        continue
+                    if compare_watermark_values(record.watermark_value, last_seen_watermark) < 0:
+                        stats.out_of_order_records += 1
+                    if self._is_newer_watermark(record.watermark_value, last_seen_watermark):
+                        last_seen_watermark = record.watermark_value
+                processed_successfully = self._apply_route(job, record, stats)
+                if not processed_successfully:
+                    checkpoint_blocked = True
+                    continue
+                if self.config.runtime.mode == "incremental":
+                    candidate_checkpoint = self._advance_checkpoint(candidate_checkpoint, record)
                 if self._is_newer_watermark(record.watermark_value, stats.max_watermark):
                     stats.max_watermark = record.watermark_value
                 if (
                     self.config.runtime.flush_state_each_batch
                     and stats.docs_seen % self.config.runtime.batch_size == 0
                 ):
-                    if self.config.runtime.mode == "incremental" and stats.max_watermark is not None:
-                        self.watermarks.set(job.name, stats.max_watermark)
                     self.registry.flush()
-                    self.watermarks.flush()
-
-            if self.config.runtime.mode == "incremental" and stats.max_watermark is not None:
-                self.watermarks.set(job.name, stats.max_watermark)
+            if self.config.runtime.mode == "incremental":
+                if stats.out_of_order_records > 0:
+                    checkpoint_blocked = True
+                    LOGGER.warning(
+                        "Checkpoint not advanced for v2 job %s because out-of-order incremental "
+                        "records were observed (%s). Ensure source results are ordered by %s.",
+                        job.name,
+                        stats.out_of_order_records,
+                        job.incremental_field,
+                    )
+                if checkpoint_blocked:
+                    LOGGER.warning(
+                        "Checkpoint not advanced for v2 job %s because record-level issues occurred "
+                        "(failed=%s rejected=%s cleanup_failed=%s).",
+                        job.name,
+                        stats.failed_records,
+                        stats.rejected_records,
+                        stats.cleanup_failed,
+                    )
+                elif candidate_checkpoint.watermark is not None:
+                    self.watermarks.set_checkpoint(job.name, candidate_checkpoint)
+                    stats.max_watermark = candidate_checkpoint.watermark
             self.registry.flush()
             self.watermarks.flush()
             LOGGER.info(
-                "Completed v2 job %s | seen=%s firestore=%s spanner=%s moved=%s unchanged=%s rejected=%s failed=%s cleanup_failed=%s watermark=%s",
+                "Completed v2 job %s | seen=%s firestore=%s spanner=%s moved=%s unchanged=%s checkpoint_skipped=%s rejected=%s failed=%s cleanup_failed=%s out_of_order=%s watermark=%s",
                 job.name,
                 stats.docs_seen,
                 stats.firestore_writes,
                 stats.spanner_writes,
                 stats.moved_records,
                 stats.unchanged_skipped,
+                stats.checkpoint_skipped,
                 stats.rejected_records,
                 stats.failed_records,
                 stats.cleanup_failed,
+                stats.out_of_order_records,
                 stats.max_watermark,
             )
             all_stats[job.name] = stats

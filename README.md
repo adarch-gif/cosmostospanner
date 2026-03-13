@@ -4,16 +4,17 @@ This project provides a configurable migration framework for:
 
 1. One-time bulk backfill from Azure Cosmos DB to Google Cloud Spanner.
 2. Watermark-based incremental sync (using Cosmos `_ts`).
-3. Validation checks (counts, key existence, and sample value-level comparison).
+3. Validation checks (sampled or full checksum-based reconciliation).
 4. Preflight schema/access checks before migration.
 5. Retry/backoff and dead-letter logging for operational resiliency.
-6. Security hardening: identifier validation, least-privilege IAM defaults, and CI security scans.
+6. Security hardening: identifier validation, least-privilege IAM defaults, distributed-safe state options, and CI security scans.
 
 It now includes a separate **v2 multi-API router** for Cosmos MongoDB API and Cassandra API:
 
 - `< 1 MiB` payloads route to Firestore.
-- `>= 1 MiB` payloads route to Spanner.
+- `>= 1 MiB` payloads route to Spanner up to a safer configured cap (`8 MiB` by default).
 - Route registry tracks document destination to support deterministic moves.
+- Incremental resume uses inclusive watermark replay plus route-key deduplication to avoid boundary misses.
 - v2 implementation is isolated from v1 so requirements can evolve independently.
 
 All mapping behavior is YAML-driven.
@@ -30,6 +31,7 @@ All mapping behavior is YAML-driven.
 8. `docs/07_CODEBASE_STRUCTURE.md`
 9. `docs/08_OPERATIONS_AND_SRE.md`
 10. `docs/09_PRODUCTION_READINESS_REVIEW.md`
+11. `docs/10_INTEGRATION_TESTING.md`
 
 ## Additional deep-dive docs
 
@@ -156,6 +158,12 @@ python .\scripts\backfill.py --config .\config\migration.yaml --incremental
 python .\scripts\validate.py --config .\config\migration.yaml --sample-size 200
 ```
 
+For high-assurance cutover, run full checksum reconciliation:
+
+```powershell
+python .\scripts\validate.py --config .\config\migration.yaml --reconciliation-mode checksums
+```
+
 8. Run tests.
 
 ```powershell
@@ -216,6 +224,7 @@ See `docs/05_TERRAFORM_IAC_GUIDE.md` for full parameter/flow details.
 - `delete_rule`: optional tombstone mapping.
 - `incremental_query`: defaults to `_ts > @last_ts` if omitted.
 - `validation_columns`: optional explicit column list for value-level validation.
+- `watermark_state_file`, `state_file`, `route_registry_file`: can be local paths or `gs://bucket/object` paths.
 - `retry_*`: retry policy for Cosmos and Spanner operations.
 - `dlq_file_path`: JSONL file path for skipped/failed records.
 
@@ -229,5 +238,5 @@ See `docs/05_TERRAFORM_IAC_GUIDE.md` for full parameter/flow details.
 ## Current implementation limits
 
 - Incremental replication is watermark-based, not full CDC/change-stream semantics.
-- Validation is sampled value comparison, not full dataset checksum parity.
-- Watermark file is local state and should not be shared by concurrent writers.
+- Integration tests against live cloud resources require provisioned credentials and opt-in execution.
+- Distributed execution is safest when state files use `gs://` objects or another externally coordinated backend.

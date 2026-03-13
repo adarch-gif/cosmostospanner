@@ -10,6 +10,7 @@ import yaml
 
 SPANNER_IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,127}$")
 CASSANDRA_IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,47}$")
+SAFE_SPANNER_PAYLOAD_MAX_BYTES = 8_388_608
 
 
 @dataclass
@@ -30,7 +31,7 @@ class SpannerTargetConfig:
 @dataclass
 class RoutingConfig:
     firestore_lt_bytes: int = 1_048_576
-    spanner_max_payload_bytes: int = 10_485_760
+    spanner_max_payload_bytes: int = SAFE_SPANNER_PAYLOAD_MAX_BYTES
     payload_size_overhead_bytes: int = 2_048
 
 
@@ -205,7 +206,10 @@ def _parse_routing(raw: dict[str, Any]) -> RoutingConfig:
     routing = RoutingConfig(
         firestore_lt_bytes=int(routing_raw.get("firestore_lt_bytes", 1_048_576)),
         spanner_max_payload_bytes=int(
-            routing_raw.get("spanner_max_payload_bytes", 10_485_760)
+            routing_raw.get(
+                "spanner_max_payload_bytes",
+                SAFE_SPANNER_PAYLOAD_MAX_BYTES,
+            )
         ),
         payload_size_overhead_bytes=int(
             routing_raw.get("payload_size_overhead_bytes", 2_048)
@@ -216,6 +220,11 @@ def _parse_routing(raw: dict[str, Any]) -> RoutingConfig:
     if routing.spanner_max_payload_bytes < routing.firestore_lt_bytes:
         raise ValueError(
             "routing.spanner_max_payload_bytes must be >= routing.firestore_lt_bytes"
+        )
+    if routing.spanner_max_payload_bytes > SAFE_SPANNER_PAYLOAD_MAX_BYTES:
+        raise ValueError(
+            "routing.spanner_max_payload_bytes exceeds the safe recommended limit "
+            f"for Spanner payload writes ({SAFE_SPANNER_PAYLOAD_MAX_BYTES} bytes)."
         )
     if routing.payload_size_overhead_bytes < 0:
         raise ValueError("routing.payload_size_overhead_bytes must be >= 0")

@@ -24,7 +24,7 @@ jobs:
 
       - name: Run unit tests
         run: |
-          python -m pytest -q
+          python -m pytest -q -m "not integration"
 
   quality:
     runs-on: ubuntu-latest

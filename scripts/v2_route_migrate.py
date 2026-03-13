@@ -60,16 +60,18 @@ def main() -> int:
     has_issues = False
     for job_name, stats in stats_by_job.items():
         LOGGER.info(
-            "V2 job summary %s | seen=%s firestore=%s spanner=%s moved=%s unchanged=%s rejected=%s failed=%s cleanup_failed=%s watermark=%s",
+            "V2 job summary %s | seen=%s firestore=%s spanner=%s moved=%s unchanged=%s checkpoint_skipped=%s rejected=%s failed=%s cleanup_failed=%s out_of_order=%s watermark=%s",
             job_name,
             stats.docs_seen,
             stats.firestore_writes,
             stats.spanner_writes,
             stats.moved_records,
             stats.unchanged_skipped,
+            stats.checkpoint_skipped,
             stats.rejected_records,
             stats.failed_records,
             stats.cleanup_failed,
+            stats.out_of_order_records,
             stats.max_watermark,
         )
         if stats.rejected_records > 0 or stats.failed_records > 0 or stats.cleanup_failed > 0:
@@ -83,4 +85,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -9,7 +9,7 @@ The code supports:
 - Full backfill.
 - Watermark-based incremental sync.
 - Preflight source/target checks.
-- Reconciliation validation (counts + key existence + sample value checks).
+- Reconciliation validation (sampled or full checksum mode).
 - Retry/backoff and dead-letter handling.
 
 ## High-level design
@@ -44,7 +44,7 @@ The project is intentionally simple and script-driven:
 1. Read last watermark from `runtime.watermark_state_file`.
 2. Execute `incremental_query` (default: `_ts > @last_ts` with overlap window).
 3. Upsert/delete transformed rows in batches.
-4. Track `max_ts_seen` and persist new watermark when mapping completes.
+4. Track `max_ts_seen` and persist a new watermark only after successful writes.
 5. Optionally flush watermark state after each mapping.
 
 ## Idempotency model
@@ -74,11 +74,10 @@ The project is intentionally simple and script-driven:
 - Secrets are read from environment variables (recommended) or inline config.
 - Cosmos key should be supplied via `source.key_env`.
 - GCP auth relies on Application Default Credentials.
-- Watermark state file is local and should be protected with least privilege.
+- Watermark state can use either a local file or a `gs://` object and should be protected with least privilege.
 - Dead-letter file can contain source records; protect access similarly to production data.
 
 ## Limitations to understand before production
 
-- No distributed lock around watermark file for concurrent writers.
-- Validation is sampled (counts + key existence + sampled values), not full value checksum parity.
+- Full live-cloud integration tests still depend on user-provided resources and credentials.
 - Incremental mode is watermark polling, not true cross-cloud CDC stream replication.

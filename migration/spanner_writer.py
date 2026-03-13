@@ -76,6 +76,7 @@ class SpannerWriter:
 
     def count_rows(self, table: str) -> int:
         def operation() -> int:
+            # Table names are validated during config loading before they are interpolated.
             sql = f"SELECT COUNT(1) FROM `{table}`"  # nosec B608
             with self._database.snapshot() as snapshot:
                 row = next(iter(snapshot.execute_sql(sql)), [0])
@@ -140,6 +141,42 @@ class SpannerWriter:
         return run_with_retry(
             operation,
             operation_name=f"read_rows_by_keys:{table}",
+            policy=self._retry_policy,
+            logger=LOGGER,
+        )
+
+    def read_all_rows(
+        self,
+        table: str,
+        key_columns: list[str],
+        data_columns: list[str],
+    ) -> dict[tuple[Any, ...], dict[str, Any]]:
+        selected_columns: list[str] = []
+        for column in [*key_columns, *data_columns]:
+            if column not in selected_columns:
+                selected_columns.append(column)
+
+        quoted_columns = ", ".join(f"`{column}`" for column in selected_columns)
+        order_clause = ", ".join(f"`{column}`" for column in key_columns)
+
+        def operation() -> dict[tuple[Any, ...], dict[str, Any]]:
+            output: dict[tuple[Any, ...], dict[str, Any]] = {}
+            # Table and column identifiers are validated during config loading.
+            sql = f"SELECT {quoted_columns} FROM `{table}` ORDER BY {order_clause}"  # nosec B608
+            with self._database.snapshot() as snapshot:
+                rows = snapshot.execute_sql(sql)
+                for row in rows:
+                    row_dict = {
+                        selected_columns[idx]: row[idx]
+                        for idx in range(len(selected_columns))
+                    }
+                    key_tuple = tuple(row_dict[col] for col in key_columns)
+                    output[key_tuple] = row_dict
+            return output
+
+        return run_with_retry(
+            operation,
+            operation_name=f"read_all_rows:{table}",
             policy=self._retry_policy,
             logger=LOGGER,
         )
