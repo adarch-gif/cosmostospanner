@@ -6,11 +6,14 @@ This is the first document to read if you are new to the repository.
 
 For the current source-of-truth material, read these after this file:
 
-1. `docs/ARCHITECTURE.md`
-2. `docs/RUNBOOK.md`
-3. `docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md`
-4. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
-5. `docs/CONFIG_REFERENCE.md`
+1. `docs/14_EXECUTIVE_SUMMARY.md`
+2. `docs/15_OPERATOR_QUICK_REFERENCE.md`
+3. `docs/16_DOCUMENTATION_INDEX.md`
+4. `docs/ARCHITECTURE.md`
+5. `docs/RUNBOOK.md`
+6. `docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md`
+7. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
+8. `docs/CONFIG_REFERENCE.md`
 
 ## What this repo does
 
@@ -39,20 +42,25 @@ Both pipelines are configurable and production-oriented.
 12. `11_RELEASE_GATE_AND_STAGE_REHEARSAL.md`
 13. `12_DETAILED_ARCHITECTURE_DIAGRAM.md`
 14. `13_DETAILED_DATA_FLOW_DIAGRAM.md`
+15. `14_EXECUTIVE_SUMMARY.md`
+16. `15_OPERATOR_QUICK_REFERENCE.md`
+17. `16_DOCUMENTATION_INDEX.md`
 
 ## Fastest path for first-time setup
 
-1. Read `06_CONFIG_PARAMETERS_AND_SECRETS.md` to understand required inputs.
-2. Read `ARCHITECTURE.md` for the full control-plane and pipeline model.
-3. Read `RUNBOOK.md` for the full operating model.
-4. Provision infra with Terraform:
+1. Read `14_EXECUTIVE_SUMMARY.md` for the shortest serious overview.
+2. Read `16_DOCUMENTATION_INDEX.md` to choose the right depth and path.
+3. Read `06_CONFIG_PARAMETERS_AND_SECRETS.md` to understand required inputs.
+4. Read `ARCHITECTURE.md` for the full control-plane and pipeline model.
+5. Read `RUNBOOK.md` for the full operating model.
+6. Provision infra with Terraform:
    - `05_TERRAFORM_IAC_GUIDE.md`
-5. Run preflight + migration:
+7. Run preflight + migration:
    - v1: `03_V1_SQL_API_QUICKSTART.md`
    - v2: `04_V2_MULTIAPI_ROUTER_QUICKSTART.md`
-6. Review SRE and cutover guidance:
+8. Review SRE and cutover guidance:
    - `08_OPERATIONS_AND_SRE.md`
-7. Run live-cloud preflight smoke tests before rehearsal/cutover:
+9. Run live-cloud preflight smoke tests before rehearsal/cutover:
    - `10_INTEGRATION_TESTING.md`
-8. If prod runs must be blocked without successful stage rehearsal:
+10. If prod runs must be blocked without successful stage rehearsal:
    - `11_RELEASE_GATE_AND_STAGE_REHEARSAL.md`

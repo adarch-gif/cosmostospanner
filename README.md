@@ -39,6 +39,9 @@ All mapping behavior is YAML-driven.
 12. `docs/11_RELEASE_GATE_AND_STAGE_REHEARSAL.md`
 13. `docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md`
 14. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
+15. `docs/14_EXECUTIVE_SUMMARY.md`
+16. `docs/15_OPERATOR_QUICK_REFERENCE.md`
+17. `docs/16_DOCUMENTATION_INDEX.md`
 
 ## Additional deep-dive docs
 
@@ -57,6 +60,17 @@ The canonical source-of-truth documents are now:
 2. `docs/RUNBOOK.md`
 3. `docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md`
 4. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
+
+For the grouped navigation view, use:
+
+1. `docs/16_DOCUMENTATION_INDEX.md`
+
+For the shortest high-value reading path, use:
+
+1. `docs/14_EXECUTIVE_SUMMARY.md`
+2. `docs/15_OPERATOR_QUICK_REFERENCE.md`
+3. `docs/ARCHITECTURE.md`
+4. `docs/RUNBOOK.md`
 
 ## Folder structure
 
