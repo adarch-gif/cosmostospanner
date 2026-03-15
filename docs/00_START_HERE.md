@@ -2,6 +2,16 @@
 
 This is the first document to read if you are new to the repository.
 
+## Canonical deep references
+
+For the current source-of-truth material, read these after this file:
+
+1. `docs/ARCHITECTURE.md`
+2. `docs/RUNBOOK.md`
+3. `docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md`
+4. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
+5. `docs/CONFIG_REFERENCE.md`
+
 ## What this repo does
 
 This repository contains two migration solutions:
@@ -33,14 +43,16 @@ Both pipelines are configurable and production-oriented.
 ## Fastest path for first-time setup
 
 1. Read `06_CONFIG_PARAMETERS_AND_SECRETS.md` to understand required inputs.
-2. Provision infra with Terraform:
+2. Read `ARCHITECTURE.md` for the full control-plane and pipeline model.
+3. Read `RUNBOOK.md` for the full operating model.
+4. Provision infra with Terraform:
    - `05_TERRAFORM_IAC_GUIDE.md`
-3. Run preflight + migration:
+5. Run preflight + migration:
    - v1: `03_V1_SQL_API_QUICKSTART.md`
    - v2: `04_V2_MULTIAPI_ROUTER_QUICKSTART.md`
-4. Review SRE and cutover guidance:
+6. Review SRE and cutover guidance:
    - `08_OPERATIONS_AND_SRE.md`
-5. Run live-cloud preflight smoke tests before rehearsal/cutover:
+7. Run live-cloud preflight smoke tests before rehearsal/cutover:
    - `10_INTEGRATION_TESTING.md`
-6. If prod runs must be blocked without successful stage rehearsal:
+8. If prod runs must be blocked without successful stage rehearsal:
    - `11_RELEASE_GATE_AND_STAGE_REHEARSAL.md`

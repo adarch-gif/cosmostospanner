@@ -1,5 +1,14 @@
 # 08 - Operations and SRE Guidance
 
+This document is now the short SRE summary. The canonical operational reference is `docs/RUNBOOK.md`.
+
+Read these together:
+
+1. `docs/RUNBOOK.md`
+2. `docs/11_RELEASE_GATE_AND_STAGE_REHEARSAL.md`
+3. `docs/TROUBLESHOOTING.md`
+4. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
+
 ## 1. Core operational controls
 
 1. Run preflight before each migration run.

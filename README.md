@@ -51,6 +51,13 @@ All mapping behavior is YAML-driven.
 - `docs/V2_MULTIAPI_ROUTING.md`
 - `infra/terraform/README.md`
 
+The canonical source-of-truth documents are now:
+
+1. `docs/ARCHITECTURE.md`
+2. `docs/RUNBOOK.md`
+3. `docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md`
+4. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
+
 ## Folder structure
 
 - `config/migration.example.yaml`: end-to-end config template.

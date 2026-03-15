@@ -2,6 +2,13 @@
 
 This guide runs the v1 pipeline end-to-end.
 
+For the full architecture, checkpoint, distributed-execution, and cutover model, read:
+
+1. `docs/ARCHITECTURE.md`
+2. `docs/RUNBOOK.md`
+3. `docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md`
+4. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
+
 ## 1. Install dependencies
 
 ```powershell
