@@ -27,6 +27,8 @@ Both pipelines are configurable and production-oriented.
 10. `09_PRODUCTION_READINESS_REVIEW.md`
 11. `10_INTEGRATION_TESTING.md`
 12. `11_RELEASE_GATE_AND_STAGE_REHEARSAL.md`
+13. `12_DETAILED_ARCHITECTURE_DIAGRAM.md`
+14. `13_DETAILED_DATA_FLOW_DIAGRAM.md`
 
 ## Fastest path for first-time setup
 

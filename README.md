@@ -37,6 +37,8 @@ All mapping behavior is YAML-driven.
 10. `docs/09_PRODUCTION_READINESS_REVIEW.md`
 11. `docs/10_INTEGRATION_TESTING.md`
 12. `docs/11_RELEASE_GATE_AND_STAGE_REHEARSAL.md`
+13. `docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md`
+14. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
 
 ## Additional deep-dive docs
 
