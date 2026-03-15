@@ -10,12 +10,14 @@ If you are new:
 2. `docs/14_EXECUTIVE_SUMMARY.md`
 3. `docs/ARCHITECTURE.md`
 4. `docs/RUNBOOK.md`
+5. `docs/HOME.md`
 
 If you are in an active migration window:
 
 1. `docs/15_OPERATOR_QUICK_REFERENCE.md`
-2. `docs/RUNBOOK.md`
-3. `docs/TROUBLESHOOTING.md`
+2. `docs/17_OPERATOR_RUN_SHEET.md`
+3. `docs/RUNBOOK.md`
+4. `docs/TROUBLESHOOTING.md`
 
 If you are reviewing or approving the repository:
 
@@ -42,6 +44,7 @@ Use these when you want orientation before depth.
 2. `docs/14_EXECUTIVE_SUMMARY.md`
 3. `docs/15_OPERATOR_QUICK_REFERENCE.md`
 4. `docs/16_DOCUMENTATION_INDEX.md`
+5. `docs/HOME.md`
 
 ## 4. Quickstarts
 
@@ -71,6 +74,7 @@ Use these when you are planning or running production-like work.
 3. `docs/11_RELEASE_GATE_AND_STAGE_REHEARSAL.md`
 4. `docs/GO_LIVE_CHECKLIST.md`
 5. `docs/TROUBLESHOOTING.md`
+6. `docs/17_OPERATOR_RUN_SHEET.md`
 
 ## 7. Configuration and environment docs
 
@@ -101,9 +105,10 @@ Use these when you want historical context, onboarding depth, or review perspect
 ### Operator or release engineer
 
 1. `docs/15_OPERATOR_QUICK_REFERENCE.md`
-2. `docs/RUNBOOK.md`
-3. `docs/11_RELEASE_GATE_AND_STAGE_REHEARSAL.md`
-4. `docs/TROUBLESHOOTING.md`
+2. `docs/17_OPERATOR_RUN_SHEET.md`
+3. `docs/RUNBOOK.md`
+4. `docs/11_RELEASE_GATE_AND_STAGE_REHEARSAL.md`
+5. `docs/TROUBLESHOOTING.md`
 
 ### Maintainer or reviewer
 
@@ -117,9 +122,10 @@ Use these when you want historical context, onboarding depth, or review perspect
 
 1. `docs/00_START_HERE.md`
 2. `docs/14_EXECUTIVE_SUMMARY.md`
-3. `docs/ARCHITECTURE.md`
-4. `docs/RUNBOOK.md`
-5. `docs/ENGINEER_ONBOARDING_GUIDE.md`
+3. `docs/HOME.md`
+4. `docs/ARCHITECTURE.md`
+5. `docs/RUNBOOK.md`
+6. `docs/ENGINEER_ONBOARDING_GUIDE.md`
 
 ## 10. If you only read three files
 

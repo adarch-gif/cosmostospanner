@@ -1,5 +1,11 @@
 # Cosmos DB -> Cloud Spanner Migration Toolkit
 
+[![CI](https://github.com/adarch-gif/cosmostospanner/actions/workflows/ci.yml/badge.svg)](https://github.com/adarch-gif/cosmostospanner/actions/workflows/ci.yml)
+![Docs](https://img.shields.io/badge/docs-structured-blue)
+![Pipelines](https://img.shields.io/badge/pipelines-v1%20%2B%20v2-1f6feb)
+![Release Gate](https://img.shields.io/badge/release_gate-stage--aware-green)
+![Control Plane](https://img.shields.io/badge/control_plane-local%20%7C%20gcs%20%7C%20spanner-orange)
+
 This repository is a production-oriented migration toolkit for moving data from Azure Cosmos DB to Google Cloud data stores.
 
 It supports:
@@ -37,6 +43,7 @@ If you only want the shortest serious reading path:
 If you want the grouped documentation map:
 
 1. [Documentation Index](docs/16_DOCUMENTATION_INDEX.md)
+2. [Documentation Home](docs/HOME.md)
 
 If you are brand new to the repo:
 
@@ -54,9 +61,10 @@ If you are brand new to the repo:
 ### Operator or release engineer
 
 1. [Operator Quick Reference](docs/15_OPERATOR_QUICK_REFERENCE.md)
-2. [Operations Runbook](docs/RUNBOOK.md)
-3. [Release Gate And Stage Rehearsal](docs/11_RELEASE_GATE_AND_STAGE_REHEARSAL.md)
-4. [Troubleshooting](docs/TROUBLESHOOTING.md)
+2. [Operator Run Sheet](docs/17_OPERATOR_RUN_SHEET.md)
+3. [Operations Runbook](docs/RUNBOOK.md)
+4. [Release Gate And Stage Rehearsal](docs/11_RELEASE_GATE_AND_STAGE_REHEARSAL.md)
+5. [Troubleshooting](docs/TROUBLESHOOTING.md)
 
 ### Maintainer or code reviewer
 
@@ -75,6 +83,7 @@ These are the primary references for the current system:
 3. [Detailed Architecture Diagram](docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md)
 4. [Detailed Data Flow Diagram](docs/13_DETAILED_DATA_FLOW_DIAGRAM.md)
 5. [Config Reference](docs/CONFIG_REFERENCE.md)
+6. [Documentation Home](docs/HOME.md)
 
 ## Quick Start
 
@@ -128,6 +137,8 @@ python .\scripts\v2_route_migrate.py --config .\config\v2.multiapi-routing.yaml 
 ```
 
 For the full operating model, do not stop here. Read the [Operations Runbook](docs/RUNBOOK.md).
+
+If you want the docs folder to have its own GitHub landing page, use [Documentation Home](docs/HOME.md).
 
 ## Common Commands
 
@@ -244,14 +255,16 @@ Do not treat the README as the full operating manual. Use the [Operations Runboo
 2. [Detailed Architecture Diagram](docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md)
 3. [Detailed Data Flow Diagram](docs/13_DETAILED_DATA_FLOW_DIAGRAM.md)
 4. [Codebase Structure](docs/07_CODEBASE_STRUCTURE.md)
+5. [Documentation Home](docs/HOME.md)
 
 ### Operations and cutover
 
 1. [Operations Runbook](docs/RUNBOOK.md)
 2. [Operator Quick Reference](docs/15_OPERATOR_QUICK_REFERENCE.md)
-3. [Operations and SRE Guidance](docs/08_OPERATIONS_AND_SRE.md)
-4. [Release Gate And Stage Rehearsal](docs/11_RELEASE_GATE_AND_STAGE_REHEARSAL.md)
-5. [Troubleshooting](docs/TROUBLESHOOTING.md)
+3. [Operator Run Sheet](docs/17_OPERATOR_RUN_SHEET.md)
+4. [Operations and SRE Guidance](docs/08_OPERATIONS_AND_SRE.md)
+5. [Release Gate And Stage Rehearsal](docs/11_RELEASE_GATE_AND_STAGE_REHEARSAL.md)
+6. [Troubleshooting](docs/TROUBLESHOOTING.md)
 
 ### Quickstarts and setup
 
@@ -266,7 +279,8 @@ Do not treat the README as the full operating manual. Use the [Operations Runboo
 
 1. [Executive Summary](docs/14_EXECUTIVE_SUMMARY.md)
 2. [Documentation Index](docs/16_DOCUMENTATION_INDEX.md)
-3. [Production Readiness Review](docs/09_PRODUCTION_READINESS_REVIEW.md)
-4. [Senior Review](docs/SENIOR_REVIEW.md)
-5. [Developer Handover](docs/DEVELOPER_HANDOVER.md)
-6. [Engineer Onboarding Guide](docs/ENGINEER_ONBOARDING_GUIDE.md)
+3. [Documentation Home](docs/HOME.md)
+4. [Production Readiness Review](docs/09_PRODUCTION_READINESS_REVIEW.md)
+5. [Senior Review](docs/SENIOR_REVIEW.md)
+6. [Developer Handover](docs/DEVELOPER_HANDOVER.md)
+7. [Engineer Onboarding Guide](docs/ENGINEER_ONBOARDING_GUIDE.md)

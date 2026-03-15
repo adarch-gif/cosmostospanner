@@ -8,12 +8,14 @@ For the current source-of-truth material, read these after this file:
 
 1. `docs/14_EXECUTIVE_SUMMARY.md`
 2. `docs/15_OPERATOR_QUICK_REFERENCE.md`
-3. `docs/16_DOCUMENTATION_INDEX.md`
-4. `docs/ARCHITECTURE.md`
-5. `docs/RUNBOOK.md`
-6. `docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md`
-7. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
-8. `docs/CONFIG_REFERENCE.md`
+3. `docs/17_OPERATOR_RUN_SHEET.md`
+4. `docs/16_DOCUMENTATION_INDEX.md`
+5. `docs/HOME.md`
+6. `docs/ARCHITECTURE.md`
+7. `docs/RUNBOOK.md`
+8. `docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md`
+9. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
+10. `docs/CONFIG_REFERENCE.md`
 
 ## What this repo does
 
@@ -45,6 +47,7 @@ Both pipelines are configurable and production-oriented.
 15. `14_EXECUTIVE_SUMMARY.md`
 16. `15_OPERATOR_QUICK_REFERENCE.md`
 17. `16_DOCUMENTATION_INDEX.md`
+18. `17_OPERATOR_RUN_SHEET.md`
 
 ## Fastest path for first-time setup
 
