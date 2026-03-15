@@ -1,14 +1,14 @@
-# Operations Runbook
+# 20 - Operations Runbook
 
 This document is the canonical operations manual for the `cosmos-to-spanner-migration` repository. It is written for engineers, operators, SREs, and technical leads who need to run the repository safely in development, stage, or production. The architecture document explains how the system is designed. This runbook explains how to operate it without guessing.
 
 Read this document together with:
 
-1. `docs/ARCHITECTURE.md`
-2. `docs/CONFIG_REFERENCE.md`
+1. `docs/19_ARCHITECTURE_REFERENCE.md`
+2. `docs/21_CONFIG_REFERENCE.md`
 3. `docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md`
 4. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
-5. `docs/TROUBLESHOOTING.md`
+5. `docs/24_TROUBLESHOOTING.md`
 6. `docs/11_RELEASE_GATE_AND_STAGE_REHEARSAL.md`
 
 ## Table of Contents

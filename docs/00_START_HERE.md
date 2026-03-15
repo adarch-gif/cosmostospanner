@@ -10,12 +10,12 @@ For the current source-of-truth material, read these after this file:
 2. `docs/15_OPERATOR_QUICK_REFERENCE.md`
 3. `docs/17_OPERATOR_RUN_SHEET.md`
 4. `docs/16_DOCUMENTATION_INDEX.md`
-5. `docs/HOME.md`
-6. `docs/ARCHITECTURE.md`
-7. `docs/RUNBOOK.md`
+5. `docs/18_DOCUMENTATION_HOME.md`
+6. `docs/19_ARCHITECTURE_REFERENCE.md`
+7. `docs/20_OPERATIONS_RUNBOOK.md`
 8. `docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md`
 9. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
-10. `docs/CONFIG_REFERENCE.md`
+10. `docs/21_CONFIG_REFERENCE.md`
 
 ## What this repo does
 
@@ -48,14 +48,25 @@ Both pipelines are configurable and production-oriented.
 16. `15_OPERATOR_QUICK_REFERENCE.md`
 17. `16_DOCUMENTATION_INDEX.md`
 18. `17_OPERATOR_RUN_SHEET.md`
+19. `18_DOCUMENTATION_HOME.md`
+20. `19_ARCHITECTURE_REFERENCE.md`
+21. `20_OPERATIONS_RUNBOOK.md`
+22. `21_CONFIG_REFERENCE.md`
+23. `22_V2_MULTIAPI_ROUTING.md`
+24. `23_GO_LIVE_CHECKLIST.md`
+25. `24_TROUBLESHOOTING.md`
+26. `25_SENIOR_REVIEW.md`
+27. `26_DEVELOPER_HANDOVER.md`
+28. `27_ENGINEER_ONBOARDING_GUIDE.md`
+29. `28_PRINCIPAL_ENGINEER_REVIEW.md`
 
 ## Fastest path for first-time setup
 
 1. Read `14_EXECUTIVE_SUMMARY.md` for the shortest serious overview.
 2. Read `16_DOCUMENTATION_INDEX.md` to choose the right depth and path.
 3. Read `06_CONFIG_PARAMETERS_AND_SECRETS.md` to understand required inputs.
-4. Read `ARCHITECTURE.md` for the full control-plane and pipeline model.
-5. Read `RUNBOOK.md` for the full operating model.
+4. Read `19_ARCHITECTURE_REFERENCE.md` for the full control-plane and pipeline model.
+5. Read `20_OPERATIONS_RUNBOOK.md` for the full operating model.
 6. Provision infra with Terraform:
    - `05_TERRAFORM_IAC_GUIDE.md`
 7. Run preflight + migration:

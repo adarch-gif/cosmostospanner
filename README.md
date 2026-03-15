@@ -37,13 +37,13 @@ If you only want the shortest serious reading path:
 
 1. [Executive Summary](docs/14_EXECUTIVE_SUMMARY.md)
 2. [Operator Quick Reference](docs/15_OPERATOR_QUICK_REFERENCE.md)
-3. [Architecture Reference](docs/ARCHITECTURE.md)
-4. [Operations Runbook](docs/RUNBOOK.md)
+3. [Architecture Reference](docs/19_ARCHITECTURE_REFERENCE.md)
+4. [Operations Runbook](docs/20_OPERATIONS_RUNBOOK.md)
 
 If you want the grouped documentation map:
 
 1. [Documentation Index](docs/16_DOCUMENTATION_INDEX.md)
-2. [Documentation Home](docs/HOME.md)
+2. [Documentation Home](docs/18_DOCUMENTATION_HOME.md)
 
 If you are brand new to the repo:
 
@@ -54,36 +54,36 @@ If you are brand new to the repo:
 ### Executive, approver, or reviewer
 
 1. [Executive Summary](docs/14_EXECUTIVE_SUMMARY.md)
-2. [Architecture Reference](docs/ARCHITECTURE.md)
-3. [Operations Runbook](docs/RUNBOOK.md)
+2. [Architecture Reference](docs/19_ARCHITECTURE_REFERENCE.md)
+3. [Operations Runbook](docs/20_OPERATIONS_RUNBOOK.md)
 4. [Production Readiness Review](docs/09_PRODUCTION_READINESS_REVIEW.md)
 
 ### Operator or release engineer
 
 1. [Operator Quick Reference](docs/15_OPERATOR_QUICK_REFERENCE.md)
 2. [Operator Run Sheet](docs/17_OPERATOR_RUN_SHEET.md)
-3. [Operations Runbook](docs/RUNBOOK.md)
+3. [Operations Runbook](docs/20_OPERATIONS_RUNBOOK.md)
 4. [Release Gate And Stage Rehearsal](docs/11_RELEASE_GATE_AND_STAGE_REHEARSAL.md)
-5. [Troubleshooting](docs/TROUBLESHOOTING.md)
+5. [Troubleshooting](docs/24_TROUBLESHOOTING.md)
 
 ### Maintainer or code reviewer
 
-1. [Architecture Reference](docs/ARCHITECTURE.md)
+1. [Architecture Reference](docs/19_ARCHITECTURE_REFERENCE.md)
 2. [Detailed Architecture Diagram](docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md)
 3. [Detailed Data Flow Diagram](docs/13_DETAILED_DATA_FLOW_DIAGRAM.md)
 4. [Codebase Structure](docs/07_CODEBASE_STRUCTURE.md)
-5. [Operations Runbook](docs/RUNBOOK.md)
+5. [Operations Runbook](docs/20_OPERATIONS_RUNBOOK.md)
 
 ## Canonical Source-of-Truth Docs
 
 These are the primary references for the current system:
 
-1. [Architecture Reference](docs/ARCHITECTURE.md)
-2. [Operations Runbook](docs/RUNBOOK.md)
+1. [Architecture Reference](docs/19_ARCHITECTURE_REFERENCE.md)
+2. [Operations Runbook](docs/20_OPERATIONS_RUNBOOK.md)
 3. [Detailed Architecture Diagram](docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md)
 4. [Detailed Data Flow Diagram](docs/13_DETAILED_DATA_FLOW_DIAGRAM.md)
-5. [Config Reference](docs/CONFIG_REFERENCE.md)
-6. [Documentation Home](docs/HOME.md)
+5. [Config Reference](docs/21_CONFIG_REFERENCE.md)
+6. [Documentation Home](docs/18_DOCUMENTATION_HOME.md)
 
 ## Quick Start
 
@@ -136,9 +136,9 @@ For `v2`:
 python .\scripts\v2_route_migrate.py --config .\config\v2.multiapi-routing.yaml --dry-run
 ```
 
-For the full operating model, do not stop here. Read the [Operations Runbook](docs/RUNBOOK.md).
+For the full operating model, do not stop here. Read the [Operations Runbook](docs/20_OPERATIONS_RUNBOOK.md).
 
-If you want the docs folder to have its own GitHub landing page, use [Documentation Home](docs/HOME.md).
+If you want the docs folder to have its own GitHub landing page, use [Documentation Home](docs/18_DOCUMENTATION_HOME.md).
 
 ## Common Commands
 
@@ -245,26 +245,26 @@ For serious stage or production campaigns:
 4. use release-gate enforcement for production where appropriate
 5. keep rollback ownership explicit before the run starts
 
-Do not treat the README as the full operating manual. Use the [Operations Runbook](docs/RUNBOOK.md) for real migration work.
+Do not treat the README as the full operating manual. Use the [Operations Runbook](docs/20_OPERATIONS_RUNBOOK.md) for real migration work.
 
 ## Documentation Paths
 
 ### Architecture and design
 
-1. [Architecture Reference](docs/ARCHITECTURE.md)
+1. [Architecture Reference](docs/19_ARCHITECTURE_REFERENCE.md)
 2. [Detailed Architecture Diagram](docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md)
 3. [Detailed Data Flow Diagram](docs/13_DETAILED_DATA_FLOW_DIAGRAM.md)
 4. [Codebase Structure](docs/07_CODEBASE_STRUCTURE.md)
-5. [Documentation Home](docs/HOME.md)
+5. [Documentation Home](docs/18_DOCUMENTATION_HOME.md)
 
 ### Operations and cutover
 
-1. [Operations Runbook](docs/RUNBOOK.md)
+1. [Operations Runbook](docs/20_OPERATIONS_RUNBOOK.md)
 2. [Operator Quick Reference](docs/15_OPERATOR_QUICK_REFERENCE.md)
 3. [Operator Run Sheet](docs/17_OPERATOR_RUN_SHEET.md)
 4. [Operations and SRE Guidance](docs/08_OPERATIONS_AND_SRE.md)
 5. [Release Gate And Stage Rehearsal](docs/11_RELEASE_GATE_AND_STAGE_REHEARSAL.md)
-6. [Troubleshooting](docs/TROUBLESHOOTING.md)
+6. [Troubleshooting](docs/24_TROUBLESHOOTING.md)
 
 ### Quickstarts and setup
 
@@ -279,8 +279,9 @@ Do not treat the README as the full operating manual. Use the [Operations Runboo
 
 1. [Executive Summary](docs/14_EXECUTIVE_SUMMARY.md)
 2. [Documentation Index](docs/16_DOCUMENTATION_INDEX.md)
-3. [Documentation Home](docs/HOME.md)
+3. [Documentation Home](docs/18_DOCUMENTATION_HOME.md)
 4. [Production Readiness Review](docs/09_PRODUCTION_READINESS_REVIEW.md)
-5. [Senior Review](docs/SENIOR_REVIEW.md)
-6. [Developer Handover](docs/DEVELOPER_HANDOVER.md)
-7. [Engineer Onboarding Guide](docs/ENGINEER_ONBOARDING_GUIDE.md)
+5. [Senior Review](docs/25_SENIOR_REVIEW.md)
+6. [Developer Handover](docs/26_DEVELOPER_HANDOVER.md)
+7. [Engineer Onboarding Guide](docs/27_ENGINEER_ONBOARDING_GUIDE.md)
+8. [Principal Engineer Review](docs/28_PRINCIPAL_ENGINEER_REVIEW.md)

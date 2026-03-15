@@ -282,13 +282,13 @@ cosmos-to-spanner-migration/
 │
 ├── docs/                                # ── DOCUMENTATION ──
 │   ├── 00_START_HERE.md → 10_INTEGRATION_TESTING.md  # Numbered onboarding sequence
-│   ├── ARCHITECTURE.md                  #   Deep-dive architecture
-│   ├── CONFIG_REFERENCE.md              #   Exhaustive parameter reference
-│   ├── RUNBOOK.md                       #   Operational runbook
-│   ├── TROUBLESHOOTING.md               #   Common issues and fixes
-│   ├── GO_LIVE_CHECKLIST.md             #   Pre-cutover checklist
-│   ├── SENIOR_REVIEW.md                 #   Code review guidelines
-│   └── V2_MULTIAPI_ROUTING.md           #   v2 routing deep-dive
+│   ├── 19_ARCHITECTURE_REFERENCE.md     #   Deep-dive architecture
+│   ├── 21_CONFIG_REFERENCE.md           #   Exhaustive parameter reference
+│   ├── 20_OPERATIONS_RUNBOOK.md         #   Operational runbook
+│   ├── 24_TROUBLESHOOTING.md               #   Common issues and fixes
+│   ├── 23_GO_LIVE_CHECKLIST.md             #   Pre-cutover checklist
+│   ├── 25_SENIOR_REVIEW.md                 #   Code review guidelines
+│   └── 22_V2_MULTIAPI_ROUTING.md           #   v2 routing deep-dive
 │
 ├── .github/workflows/ci.yml            # ── CI/CD ──
 ├── pyproject.toml                       # Ruff + MyPy config
@@ -761,7 +761,7 @@ Each environment uses the same Terraform module but with different variable valu
 
 ### Workflow: Production Cutover
 
-See `docs/GO_LIVE_CHECKLIST.md` for the complete checklist. High-level:
+See `docs/23_GO_LIVE_CHECKLIST.md` for the complete checklist. High-level:
 
 1. Run preflight checks ✓
 2. Complete full backfill ✓
@@ -853,7 +853,7 @@ Remove-Item state\dead_letters.jsonl -ErrorAction SilentlyContinue
 ### Day 4: v2 Pipeline + Infrastructure (2–3 hours)
 
 11. `docs/04_V2_MULTIAPI_ROUTER_QUICKSTART.md`
-12. `docs/V2_MULTIAPI_ROUTING.md` — Deep dive on routing
+12. `docs/22_V2_MULTIAPI_ROUTING.md` — Deep dive on routing
 13. Read:
     - `migration_v2/router.py` — Size-based routing logic
     - `migration_v2/pipeline.py` — v2 orchestration
@@ -863,14 +863,14 @@ Remove-Item state\dead_letters.jsonl -ErrorAction SilentlyContinue
 
 15. `docs/08_OPERATIONS_AND_SRE.md` — How to run in production
 16. `docs/09_PRODUCTION_READINESS_REVIEW.md` — Checklist before go-live
-17. `docs/RUNBOOK.md` — Operational procedures
-18. `docs/TROUBLESHOOTING.md` — Common issues and fixes
-19. `docs/GO_LIVE_CHECKLIST.md` — Cutover procedure
+17. `docs/20_OPERATIONS_RUNBOOK.md` — Operational procedures
+18. `docs/24_TROUBLESHOOTING.md` — Common issues and fixes
+19. `docs/23_GO_LIVE_CHECKLIST.md` — Cutover procedure
 
 ### Ongoing Reference
 
-- `docs/CONFIG_REFERENCE.md` — Look up any config parameter
-- `docs/SENIOR_REVIEW.md` — Code review standards
+- `docs/21_CONFIG_REFERENCE.md` — Look up any config parameter
+- `docs/25_SENIOR_REVIEW.md` — Code review standards
 - `docs/10_INTEGRATION_TESTING.md` — When you need live cloud tests
 
 ---

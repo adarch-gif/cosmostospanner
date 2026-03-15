@@ -1,6 +1,6 @@
 # 17 - Operator Run Sheet
 
-This is the compact printable run sheet for active migration windows. It is intentionally short. Use it beside the terminal. For details, use `RUNBOOK.md`.
+This is the compact printable run sheet for active migration windows. It is intentionally short. Use it beside the terminal. For details, use `20_OPERATIONS_RUNBOOK.md`.
 
 ## Before You Start
 

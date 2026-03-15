@@ -4,8 +4,8 @@ This guide runs the v2 pipeline end-to-end.
 
 For the full routed-architecture, route-registry, cleanup, validation, and cutover model, read:
 
-1. `docs/ARCHITECTURE.md`
-2. `docs/RUNBOOK.md`
+1. `docs/19_ARCHITECTURE_REFERENCE.md`
+2. `docs/20_OPERATIONS_RUNBOOK.md`
 3. `docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md`
 4. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
 

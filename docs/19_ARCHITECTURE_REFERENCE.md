@@ -1,4 +1,4 @@
-# Architecture Reference
+# 19 - Architecture Reference
 
 This document is the canonical architecture reference for the `cosmos-to-spanner-migration` repository. It explains what the system is trying to achieve, why the codebase is split into two pipelines, how the distributed control plane works, how checkpoints and reader cursors differ, how idempotency is preserved, how data integrity is validated, and where the code is designed to be extended safely.
 
@@ -6,8 +6,8 @@ If you are new to the repository, read this guide together with:
 
 1. `docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md`
 2. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
-3. `docs/RUNBOOK.md`
-4. `docs/CONFIG_REFERENCE.md`
+3. `docs/20_OPERATIONS_RUNBOOK.md`
+4. `docs/21_CONFIG_REFERENCE.md`
 5. `docs/07_CODEBASE_STRUCTURE.md`
 
 This guide is intentionally long. The repository is no longer a simple one-shot migration script. It now contains two distinct migration engines, a shared control-plane abstraction, distributed coordination, release-gate enforcement, structured observability, and multiple correctness layers. Short summaries are useful as entry points, but they are not enough to operate, extend, or review the system at Principal level.
@@ -365,9 +365,9 @@ The infrastructure tree provisions the target environment and supporting service
 
 The documentation folder is intentionally numbered for onboarding flow, but the canonical deep references are now:
 
-1. `docs/ARCHITECTURE.md`
-2. `docs/RUNBOOK.md`
-3. `docs/CONFIG_REFERENCE.md`
+1. `docs/19_ARCHITECTURE_REFERENCE.md`
+2. `docs/20_OPERATIONS_RUNBOOK.md`
+3. `docs/21_CONFIG_REFERENCE.md`
 4. `docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md`
 5. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
 
@@ -1803,8 +1803,8 @@ If you are onboarding as an engineer or reviewer, the recommended reading order 
 3. this file
 4. `docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md`
 5. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
-6. `docs/CONFIG_REFERENCE.md`
-7. `docs/RUNBOOK.md`
+6. `docs/21_CONFIG_REFERENCE.md`
+7. `docs/20_OPERATIONS_RUNBOOK.md`
 8. `docs/07_CODEBASE_STRUCTURE.md`
 9. `docs/11_RELEASE_GATE_AND_STAGE_REHEARSAL.md`
 10. the relevant runtime code in `migration/` or `migration_v2/`

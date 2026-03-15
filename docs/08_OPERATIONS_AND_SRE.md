@@ -1,12 +1,12 @@
 # 08 - Operations and SRE Guidance
 
-This document is now the short SRE summary. The canonical operational reference is `docs/RUNBOOK.md`.
+This document is now the short SRE summary. The canonical operational reference is `docs/20_OPERATIONS_RUNBOOK.md`.
 
 Read these together:
 
-1. `docs/RUNBOOK.md`
+1. `docs/20_OPERATIONS_RUNBOOK.md`
 2. `docs/11_RELEASE_GATE_AND_STAGE_REHEARSAL.md`
-3. `docs/TROUBLESHOOTING.md`
+3. `docs/24_TROUBLESHOOTING.md`
 4. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
 
 ## 1. Core operational controls

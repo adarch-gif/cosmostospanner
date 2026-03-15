@@ -2,7 +2,7 @@
 
 This document is the fast operational reference for active migration sessions. Use it during rehearsals, cutovers, or incident response when you need the right commands and decision points without reading the full runbook.
 
-For full context, see `docs/RUNBOOK.md`. For design context, see `docs/ARCHITECTURE.md`.
+For full context, see `docs/20_OPERATIONS_RUNBOOK.md`. For design context, see `docs/19_ARCHITECTURE_REFERENCE.md`.
 
 ## 1. Core principles
 
@@ -28,10 +28,10 @@ Before running anything:
 
 Keep these open in parallel:
 
-1. `docs/RUNBOOK.md`
-2. `docs/ARCHITECTURE.md`
+1. `docs/20_OPERATIONS_RUNBOOK.md`
+2. `docs/19_ARCHITECTURE_REFERENCE.md`
 3. `docs/11_RELEASE_GATE_AND_STAGE_REHEARSAL.md`
-4. `docs/TROUBLESHOOTING.md`
+4. `docs/24_TROUBLESHOOTING.md`
 
 ## 4. v1 command set
 
@@ -257,17 +257,17 @@ Escalate immediately if:
 If you are about to run a migration:
 
 1. this file
-2. `docs/RUNBOOK.md` relevant section
+2. `docs/20_OPERATIONS_RUNBOOK.md` relevant section
 
 If you are in an incident:
 
 1. this file
-2. `docs/TROUBLESHOOTING.md`
-3. `docs/RUNBOOK.md` incident and rollback sections
+2. `docs/24_TROUBLESHOOTING.md`
+3. `docs/20_OPERATIONS_RUNBOOK.md` incident and rollback sections
 
 If you are trying to understand behavior:
 
-1. `docs/ARCHITECTURE.md`
+1. `docs/19_ARCHITECTURE_REFERENCE.md`
 2. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
 
 ## 16. Final reminder

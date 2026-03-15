@@ -1,4 +1,4 @@
-# Configuration Reference
+# 21 - Configuration Reference
 
 Main config file format: YAML.
 

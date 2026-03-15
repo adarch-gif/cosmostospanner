@@ -149,22 +149,22 @@ If you are an executive sponsor or approver:
 
 1. this file
 2. `docs/16_DOCUMENTATION_INDEX.md`
-3. `docs/ARCHITECTURE.md` sections on goals, control plane, and release governance
-4. `docs/RUNBOOK.md` sections on cutover and rollback
+3. `docs/19_ARCHITECTURE_REFERENCE.md` sections on goals, control plane, and release governance
+4. `docs/20_OPERATIONS_RUNBOOK.md` sections on cutover and rollback
 
 If you are an operator:
 
 1. this file
 2. `docs/15_OPERATOR_QUICK_REFERENCE.md`
-3. `docs/RUNBOOK.md`
+3. `docs/20_OPERATIONS_RUNBOOK.md`
 
 If you are a maintainer or reviewer:
 
 1. this file
-2. `docs/ARCHITECTURE.md`
+2. `docs/19_ARCHITECTURE_REFERENCE.md`
 3. `docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md`
 4. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
-5. `docs/RUNBOOK.md`
+5. `docs/20_OPERATIONS_RUNBOOK.md`
 
 ## Bottom line
 

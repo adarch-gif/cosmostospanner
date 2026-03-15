@@ -2,10 +2,10 @@
 
 This document is now a short index. The canonical architecture and flow references are:
 
-1. `docs/ARCHITECTURE.md`
+1. `docs/19_ARCHITECTURE_REFERENCE.md`
 2. `docs/12_DETAILED_ARCHITECTURE_DIAGRAM.md`
 3. `docs/13_DETAILED_DATA_FLOW_DIAGRAM.md`
-4. `docs/RUNBOOK.md`
+4. `docs/20_OPERATIONS_RUNBOOK.md`
 
 Use this file as a quick orientation page, not as the full source of truth.
 
