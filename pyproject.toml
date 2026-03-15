@@ -14,3 +14,12 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 no_implicit_optional = true
 exclude = "^(tests/|tests_v2/)"
+
+[tool.coverage.run]
+branch = true
+source = ["migration", "migration_v2", "scripts"]
+omit = ["tests/*", "tests_v2/*"]
+
+[tool.coverage.report]
+skip_covered = true
+show_missing = true

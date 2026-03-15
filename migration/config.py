@@ -34,11 +34,14 @@ class RuntimeConfig:
     query_page_size: int = 200
     dry_run: bool = False
     log_level: str = "INFO"
+    log_format: str = "text"
     watermark_state_file: str = "state/watermarks.json"
     watermark_overlap_seconds: int = 5
     flush_watermark_each_mapping: bool = True
     error_mode: str = "fail"  # fail | skip
     dlq_file_path: str = "state/dead_letter.jsonl"
+    metrics_file_path: str = ""
+    metrics_format: str = "prometheus"
     retry_attempts: int = 5
     retry_initial_delay_seconds: float = 0.5
     retry_max_delay_seconds: float = 15.0
@@ -345,6 +348,7 @@ def load_config(path: str | Path) -> MigrationConfig:
         query_page_size=int(runtime_raw.get("query_page_size", 200)),
         dry_run=_parse_bool(runtime_raw.get("dry_run", False), default=False),
         log_level=str(runtime_raw.get("log_level", "INFO")),
+        log_format=str(runtime_raw.get("log_format", "text")).lower(),
         watermark_state_file=str(
             runtime_raw.get("watermark_state_file", "state/watermarks.json")
         ),
@@ -354,6 +358,8 @@ def load_config(path: str | Path) -> MigrationConfig:
         ),
         error_mode=str(runtime_raw.get("error_mode", "fail")).lower(),
         dlq_file_path=str(runtime_raw.get("dlq_file_path", "state/dead_letter.jsonl")),
+        metrics_file_path=str(runtime_raw.get("metrics_file_path", "")),
+        metrics_format=str(runtime_raw.get("metrics_format", "prometheus")).lower(),
         retry_attempts=int(runtime_raw.get("retry_attempts", 5)),
         retry_initial_delay_seconds=float(
             runtime_raw.get("retry_initial_delay_seconds", 0.5)
@@ -382,6 +388,10 @@ def load_config(path: str | Path) -> MigrationConfig:
         raise ValueError("runtime.deployment_environment must be one of: dev, stage, prod")
     if runtime.error_mode not in {"fail", "skip"}:
         raise ValueError("runtime.error_mode must be one of: fail, skip")
+    if runtime.log_format not in {"text", "json"}:
+        raise ValueError("runtime.log_format must be one of: text, json")
+    if runtime.metrics_format not in {"prometheus", "json"}:
+        raise ValueError("runtime.metrics_format must be one of: prometheus, json")
     if runtime.batch_size <= 0:
         raise ValueError("runtime.batch_size must be > 0")
     if runtime.query_page_size <= 0:

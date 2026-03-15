@@ -60,6 +60,9 @@ def test_load_config_parses_runtime_booleans_and_validation_columns(tmp_path) ->
         {
             "dry_run": "true",
             "flush_watermark_each_mapping": "yes",
+            "log_format": "json",
+            "metrics_file_path": "state/metrics.prom",
+            "metrics_format": "json",
             "retry_attempts": 3,
             "retry_initial_delay_seconds": 0.1,
             "retry_max_delay_seconds": 2.0,
@@ -81,6 +84,9 @@ def test_load_config_parses_runtime_booleans_and_validation_columns(tmp_path) ->
     config = load_config(_write_config(tmp_path, cfg))
     assert config.runtime.dry_run is True
     assert config.runtime.flush_watermark_each_mapping is True
+    assert config.runtime.log_format == "json"
+    assert config.runtime.metrics_file_path == "state/metrics.prom"
+    assert config.runtime.metrics_format == "json"
     assert config.runtime.retry_attempts == 3
     assert config.runtime.lease_file == "gs://bucket/leases.json"
     assert config.runtime.reader_cursor_state_file == "gs://bucket/reader-cursors.json"
@@ -119,6 +125,18 @@ def test_load_config_rejects_bad_retry_settings(tmp_path) -> None:
     bad["runtime"]["retry_attempts"] = 0
     with pytest.raises(ValueError, match="retry_attempts"):
         load_config(_write_config(tmp_path, bad))
+
+
+def test_load_config_rejects_invalid_log_and_metrics_formats(tmp_path) -> None:
+    cfg = _base_config()
+    cfg["runtime"]["log_format"] = "pretty"
+    with pytest.raises(ValueError, match="runtime.log_format"):
+        load_config(_write_config(tmp_path, cfg))
+
+    cfg = _base_config()
+    cfg["runtime"]["metrics_format"] = "statsd"
+    with pytest.raises(ValueError, match="runtime.metrics_format"):
+        load_config(_write_config(tmp_path, cfg))
 
 
 def test_load_config_rejects_invalid_spanner_identifiers(tmp_path) -> None:

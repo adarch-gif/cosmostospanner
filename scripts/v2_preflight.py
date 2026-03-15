@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from migration.logging_utils import configure_logging
+from migration.logging_utils import build_log_context, configure_logging
 from migration_v2.config import load_v2_config
 from migration_v2.pipeline import V2MigrationPipeline
 
@@ -37,7 +37,16 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     config = load_v2_config(args.config)
-    configure_logging(config.runtime.log_level)
+    configure_logging(
+        config.runtime.log_level,
+        config.runtime.log_format,
+        static_fields=build_log_context(
+            pipeline="v2-preflight",
+            deployment_environment=config.runtime.deployment_environment,
+            run_id=config.runtime.run_id,
+            worker_id=config.runtime.worker_id,
+        ),
+    )
 
     pipeline = V2MigrationPipeline(config)
     issues = pipeline.preflight(job_names=args.jobs, check_sources=args.check_sources)

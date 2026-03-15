@@ -42,10 +42,13 @@ class RuntimeV2Config:
     batch_size: int = 200
     dry_run: bool = False
     log_level: str = "INFO"
+    log_format: str = "text"
     error_mode: str = "fail"  # fail | skip
     state_file: str = "state/v2_watermarks.json"
     route_registry_file: str = "state/v2_route_registry.json"
     dlq_file_path: str = "state/v2_dead_letter.jsonl"
+    metrics_file_path: str = ""
+    metrics_format: str = "prometheus"
     flush_state_each_batch: bool = True
     retry_attempts: int = 5
     retry_initial_delay_seconds: float = 0.5
@@ -177,12 +180,15 @@ def _parse_runtime(raw: dict[str, Any]) -> RuntimeV2Config:
         batch_size=int(runtime_raw.get("batch_size", 200)),
         dry_run=_parse_bool(runtime_raw.get("dry_run", False), default=False),
         log_level=str(runtime_raw.get("log_level", "INFO")),
+        log_format=str(runtime_raw.get("log_format", "text")).lower(),
         error_mode=str(runtime_raw.get("error_mode", "fail")).lower(),
         state_file=str(runtime_raw.get("state_file", "state/v2_watermarks.json")),
         route_registry_file=str(
             runtime_raw.get("route_registry_file", "state/v2_route_registry.json")
         ),
         dlq_file_path=str(runtime_raw.get("dlq_file_path", "state/v2_dead_letter.jsonl")),
+        metrics_file_path=str(runtime_raw.get("metrics_file_path", "")),
+        metrics_format=str(runtime_raw.get("metrics_format", "prometheus")).lower(),
         flush_state_each_batch=_parse_bool(
             runtime_raw.get("flush_state_each_batch", True),
             default=True,
@@ -217,6 +223,10 @@ def _parse_runtime(raw: dict[str, Any]) -> RuntimeV2Config:
         raise ValueError("runtime.mode must be one of: full, incremental")
     if runtime.error_mode not in {"fail", "skip"}:
         raise ValueError("runtime.error_mode must be one of: fail, skip")
+    if runtime.log_format not in {"text", "json"}:
+        raise ValueError("runtime.log_format must be one of: text, json")
+    if runtime.metrics_format not in {"prometheus", "json"}:
+        raise ValueError("runtime.metrics_format must be one of: prometheus, json")
     if runtime.batch_size <= 0:
         raise ValueError("runtime.batch_size must be > 0")
     if runtime.retry_attempts < 1:

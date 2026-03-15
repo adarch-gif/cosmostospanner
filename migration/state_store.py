@@ -91,6 +91,10 @@ class WatermarkStore:
         self._load_spanner_key(container_name)
         return int(self.data.get(container_name, default))
 
+    def contains(self, container_name: str) -> bool:
+        self._load_spanner_key(container_name)
+        return container_name in self.data
+
     def set(self, container_name: str, value: int) -> None:
         self.data[container_name] = int(value)
         self._dirty_keys.add(container_name)

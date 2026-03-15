@@ -67,6 +67,8 @@ class CosmosReader:
                 next_token = getattr(pager, "continuation_token", None)
                 state.set_page_start_token(current_page_token)
                 for item in current_page:
+                    if max_docs and seen >= max_docs:
+                        return
                     source_key = str(item.get("id", "")) or json.dumps(
                         item,
                         sort_keys=True,
@@ -81,8 +83,6 @@ class CosmosReader:
                     ):
                         continue
                     state.mark(source_key=source_key, watermark=watermark)
-                    if max_docs and seen >= max_docs:
-                        return
                     seen += 1
                     yield item
                 continuation_token = next_token

@@ -4,6 +4,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,7 +15,8 @@ from migration.config import MigrationConfig, TableMapping, load_config
 from migration.coordination import WorkCoordinator
 from migration.cosmos_reader import CosmosReader
 from migration.dead_letter import DeadLetterSink
-from migration.logging_utils import configure_logging
+from migration.logging_utils import build_log_context, configure_logging
+from migration.metrics import MetricsCollector
 from migration.release_gate import (
     enforce_stage_rehearsal_or_raise,
     logical_fingerprint_v1,
@@ -109,10 +111,135 @@ def _mapping_work_key(mapping: TableMapping, shard_index: int | None = None) -> 
 
 
 def _watermark_key(mapping: TableMapping, shard_index: int | None = None) -> str:
+    return _mapping_work_key(mapping, shard_index)
+
+
+def _legacy_watermark_key(mapping: TableMapping, shard_index: int | None = None) -> str:
     base = mapping.source_container
     if shard_index is None or mapping.shard_count <= 1:
         return base
     return f"{base}:shard={shard_index}"
+
+
+def _load_starting_watermark(
+    watermarks: WatermarkStore,
+    mapping: TableMapping,
+    shard_index: int | None = None,
+) -> int:
+    watermark_key = _watermark_key(mapping, shard_index)
+    if watermarks.contains(watermark_key):
+        return watermarks.get(watermark_key, 0)
+
+    legacy_key = _legacy_watermark_key(mapping, shard_index)
+    if legacy_key != watermark_key and watermarks.contains(legacy_key):
+        legacy_value = watermarks.get(legacy_key, 0)
+        LOGGER.info(
+            "Using legacy watermark key %s for %s -> %s shard=%s; future checkpoints will be written to %s.",
+            legacy_key,
+            mapping.source_container,
+            mapping.target_table,
+            shard_index if shard_index is not None else "none",
+            watermark_key,
+        )
+        return legacy_value
+    return 0
+
+
+def _mapping_metric_labels(
+    mapping: TableMapping,
+    *,
+    incremental: bool,
+    shard_index: int | None,
+) -> dict[str, str]:
+    labels = {
+        "source_container": mapping.source_container,
+        "target_table": mapping.target_table,
+        "mode": "incremental" if incremental else "full",
+    }
+    if shard_index is not None and mapping.shard_count > 1:
+        labels["shard"] = str(shard_index)
+    return labels
+
+
+def _publish_mapping_metrics(
+    metrics: MetricsCollector | None,
+    *,
+    mapping: TableMapping,
+    counters: dict[str, int],
+    incremental: bool,
+    shard_index: int | None,
+    resume_watermark: int,
+    duration_seconds: float | None = None,
+) -> None:
+    if metrics is None:
+        return
+
+    labels = _mapping_metric_labels(
+        mapping,
+        incremental=incremental,
+        shard_index=shard_index,
+    )
+    metrics.gauge(
+        "migration_v1_docs_seen",
+        counters["docs_seen"],
+        labels=labels,
+        description="Current number of source documents seen for the v1 mapping.",
+    )
+    metrics.gauge(
+        "migration_v1_rows_upserted",
+        counters["rows_upserted"],
+        labels=labels,
+        description="Current number of rows upserted for the v1 mapping.",
+    )
+    metrics.gauge(
+        "migration_v1_rows_deleted",
+        counters["rows_deleted"],
+        labels=labels,
+        description="Current number of rows deleted for the v1 mapping.",
+    )
+    metrics.gauge(
+        "migration_v1_rows_failed",
+        counters["rows_failed"],
+        labels=labels,
+        description="Current number of row-level failures for the v1 mapping.",
+    )
+    metrics.gauge(
+        "migration_v1_docs_failed",
+        counters["docs_failed"],
+        labels=labels,
+        description="Current number of document-level failures for the v1 mapping.",
+    )
+    metrics.gauge(
+        "migration_v1_max_source_watermark",
+        counters["max_ts_seen"],
+        labels=labels,
+        description="Highest source watermark observed for the v1 mapping.",
+    )
+    metrics.gauge(
+        "migration_v1_max_success_watermark",
+        counters["max_success_ts"],
+        labels=labels,
+        description="Highest successfully committed watermark for the v1 mapping.",
+    )
+    metrics.gauge(
+        "migration_v1_resume_watermark",
+        resume_watermark,
+        labels=labels,
+        description="Starting resume watermark used for the v1 mapping.",
+    )
+    metrics.gauge(
+        "migration_v1_watermark_lag_seconds",
+        max(0, counters["max_ts_seen"] - counters["max_success_ts"]),
+        labels=labels,
+        description="Observed watermark lag between seen and successfully committed records.",
+    )
+    if duration_seconds is not None:
+        metrics.gauge(
+            "migration_v1_mapping_duration_seconds",
+            duration_seconds,
+            labels=labels,
+            description="Elapsed runtime for the current v1 mapping execution.",
+        )
 
 
 def _get_nested_value(document: dict[str, Any], path: str) -> Any:
@@ -258,6 +385,7 @@ def _process_mapping(
     writer: SpannerWriter,
     watermarks: WatermarkStore,
     dead_letter: DeadLetterSink,
+    metrics: MetricsCollector | None,
     cursor_store: ReaderCursorStore | None,
     incremental: bool,
     since_ts: int | None,
@@ -265,6 +393,7 @@ def _process_mapping(
     work_key: str | None = None,
     shard_index: int | None = None,
 ) -> dict[str, int]:
+    started_at = monotonic()
     counters = {
         "docs_seen": 0,
         "rows_upserted": 0,
@@ -278,7 +407,11 @@ def _process_mapping(
     delete_buffer: list[tuple[TransformOutput, StreamResumeState]] = []
 
     watermark_key = _watermark_key(mapping, shard_index)
-    last_watermark = since_ts if since_ts is not None else watermarks.get(watermark_key, 0)
+    last_watermark = (
+        since_ts
+        if since_ts is not None
+        else _load_starting_watermark(watermarks, mapping, shard_index)
+    )
     query, params = _query_for_mapping(
         mapping=mapping,
         incremental=incremental,
@@ -306,11 +439,12 @@ def _process_mapping(
         cursor_store.flush()
 
     LOGGER.info(
-        "Running mapping %s -> %s (incremental=%s, watermark=%s, query=%s)",
+        "Running mapping %s -> %s (incremental=%s, watermark=%s, watermark_key=%s, query=%s)",
         mapping.source_container,
         mapping.target_table,
         incremental,
         last_watermark,
+        watermark_key,
         query,
     )
 
@@ -375,6 +509,16 @@ def _process_mapping(
                 if batch_resume_state is not None:
                     safe_resume_state = batch_resume_state
                     persist_reader_cursor(safe_resume_state)
+                _publish_mapping_metrics(
+                    metrics,
+                    mapping=mapping,
+                    counters=counters,
+                    incremental=incremental,
+                    shard_index=shard_index,
+                    resume_watermark=last_watermark,
+                )
+                if metrics is not None:
+                    metrics.flush()
         else:
             upsert_buffer.append((result, resume_state.clone() if resume_state else StreamResumeState()))
             if len(upsert_buffer) >= config.runtime.batch_size:
@@ -390,6 +534,16 @@ def _process_mapping(
                 if batch_resume_state is not None:
                     safe_resume_state = batch_resume_state
                     persist_reader_cursor(safe_resume_state)
+                _publish_mapping_metrics(
+                    metrics,
+                    mapping=mapping,
+                    counters=counters,
+                    incremental=incremental,
+                    shard_index=shard_index,
+                    resume_watermark=last_watermark,
+                )
+                if metrics is not None:
+                    metrics.flush()
 
     batch_max_success_ts, batch_resume_state = _flush_upserts(
         writer,
@@ -434,6 +588,18 @@ def _process_mapping(
                 clear_reader_cursor()
     elif counters["rows_failed"] == 0 and counters["docs_failed"] == 0:
         clear_reader_cursor()
+
+    _publish_mapping_metrics(
+        metrics,
+        mapping=mapping,
+        counters=counters,
+        incremental=incremental,
+        shard_index=shard_index,
+        resume_watermark=last_watermark,
+        duration_seconds=monotonic() - started_at,
+    )
+    if metrics is not None:
+        metrics.flush()
     return counters
 
 
@@ -492,7 +658,22 @@ def main() -> int:
     config = load_config(args.config)
     if args.dry_run:
         config.runtime.dry_run = True
-    configure_logging(config.runtime.log_level)
+    log_context = build_log_context(
+        pipeline="v1",
+        deployment_environment=config.runtime.deployment_environment,
+        run_id=config.runtime.run_id,
+        worker_id=config.runtime.worker_id,
+    )
+    configure_logging(
+        config.runtime.log_level,
+        config.runtime.log_format,
+        static_fields=log_context,
+    )
+    metrics = MetricsCollector(
+        config.runtime.metrics_file_path,
+        output_format=config.runtime.metrics_format,
+        static_labels=log_context,
+    )
 
     mappings = _selected_mappings(config, args.containers)
     if not mappings:
@@ -564,6 +745,7 @@ def main() -> int:
                     writer=writer,
                     watermarks=watermark_store,
                     dead_letter=dead_letter,
+                    metrics=metrics,
                     cursor_store=cursor_store,
                     incremental=False,
                     since_ts=args.since_ts,
@@ -696,6 +878,7 @@ def main() -> int:
                     writer=writer,
                     watermarks=watermark_store,
                     dead_letter=dead_letter,
+                    metrics=metrics,
                     cursor_store=cursor_store,
                     incremental=args.incremental,
                     since_ts=args.since_ts,

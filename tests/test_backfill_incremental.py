@@ -45,8 +45,10 @@ from scripts import backfill
 class _FakeReader:
     def __init__(self, documents: list[dict[str, object]]) -> None:
         self._documents = documents
+        self.calls: list[dict[str, object]] = []
 
     def iter_documents(self, **_: object) -> list[dict[str, object]]:
+        self.calls.append(dict(_))
         return list(self._documents)
 
 
@@ -72,17 +74,18 @@ class _FakeWriter:
 
 
 class _FakeWatermarks:
-    def __init__(self, initial: int = 0) -> None:
-        self.current = initial
+    def __init__(self, initial: dict[str, int] | None = None) -> None:
+        self.values = dict(initial or {})
         self.flush_count = 0
 
     def get(self, container_name: str, default: int = 0) -> int:
-        del container_name
-        return self.current if self.current else default
+        return self.values.get(container_name, default)
+
+    def contains(self, container_name: str) -> bool:
+        return container_name in self.values
 
     def set(self, container_name: str, value: int) -> None:
-        del container_name
-        self.current = value
+        self.values[container_name] = value
 
     def flush(self) -> None:
         self.flush_count += 1
@@ -173,7 +176,7 @@ def test_incremental_success_advances_watermark() -> None:
         ]
     )
     writer = _FakeWriter()
-    watermarks = _FakeWatermarks(initial=5)
+    watermarks = _FakeWatermarks(initial={"v1:users->Users": 5})
     dead_letter = _FakeDeadLetter()
 
     stats = backfill._process_mapping(
@@ -183,6 +186,7 @@ def test_incremental_success_advances_watermark() -> None:
         writer=writer,
         watermarks=watermarks,
         dead_letter=dead_letter,
+        metrics=None,
         cursor_store=None,
         incremental=True,
         since_ts=None,
@@ -191,7 +195,7 @@ def test_incremental_success_advances_watermark() -> None:
     assert stats["rows_failed"] == 0
     assert stats["docs_failed"] == 0
     assert stats["max_success_ts"] == 12
-    assert watermarks.current == 12
+    assert watermarks.values["v1:users->Users"] == 12
     assert watermarks.flush_count == 1
 
 
@@ -205,7 +209,7 @@ def test_incremental_failures_hold_watermark_in_place() -> None:
         ]
     )
     writer = _FakeWriter(fail_ids={"u2"})
-    watermarks = _FakeWatermarks(initial=5)
+    watermarks = _FakeWatermarks(initial={"v1:users->Users": 5})
     dead_letter = _FakeDeadLetter()
 
     stats = backfill._process_mapping(
@@ -215,6 +219,7 @@ def test_incremental_failures_hold_watermark_in_place() -> None:
         writer=writer,
         watermarks=watermarks,
         dead_letter=dead_letter,
+        metrics=None,
         cursor_store=None,
         incremental=True,
         since_ts=None,
@@ -222,9 +227,41 @@ def test_incremental_failures_hold_watermark_in_place() -> None:
 
     assert stats["rows_failed"] == 1
     assert stats["max_success_ts"] == 10
-    assert watermarks.current == 5
+    assert watermarks.values["v1:users->Users"] == 5
     assert watermarks.flush_count == 0
     assert len(dead_letter.events) == 1
+
+
+def test_incremental_reads_legacy_watermark_and_writes_mapping_scoped_checkpoint() -> None:
+    config = _config()
+    mapping = config.mappings[0]
+    reader = _FakeReader(
+        [
+            {"id": "u1", "email": "u1@example.com", "_ts": 10},
+            {"id": "u2", "email": "u2@example.com", "_ts": 12},
+        ]
+    )
+    writer = _FakeWriter()
+    watermarks = _FakeWatermarks(initial={"users": 7})
+    dead_letter = _FakeDeadLetter()
+
+    stats = backfill._process_mapping(
+        config=config,
+        mapping=mapping,
+        reader=reader,
+        writer=writer,
+        watermarks=watermarks,
+        dead_letter=dead_letter,
+        metrics=None,
+        cursor_store=None,
+        incremental=True,
+        since_ts=None,
+    )
+
+    assert stats["max_success_ts"] == 12
+    assert reader.calls[0]["parameters"] == [{"name": "@last_ts", "value": 2}]
+    assert watermarks.values["users"] == 7
+    assert watermarks.values["v1:users->Users"] == 12
 
 
 def test_process_mapping_raises_when_distributed_lease_is_lost() -> None:
@@ -232,7 +269,7 @@ def test_process_mapping_raises_when_distributed_lease_is_lost() -> None:
     mapping = config.mappings[0]
     reader = _FakeReader([{"id": "u1", "email": "u1@example.com", "_ts": 10}])
     writer = _FakeWriter()
-    watermarks = _FakeWatermarks(initial=0)
+    watermarks = _FakeWatermarks()
     dead_letter = _FakeDeadLetter()
     coordinator = _FakeCoordinator(renew_results=[False])
 
@@ -244,6 +281,7 @@ def test_process_mapping_raises_when_distributed_lease_is_lost() -> None:
             writer=writer,
             watermarks=watermarks,
             dead_letter=dead_letter,
+            metrics=None,
             cursor_store=None,
             incremental=False,
             since_ts=None,
@@ -269,7 +307,7 @@ def test_process_mapping_filters_records_by_client_hash_shard() -> None:
     ]
     reader = _FakeReader(documents)
     writer = _FakeWriter()
-    watermarks = _FakeWatermarks(initial=0)
+    watermarks = _FakeWatermarks()
     dead_letter = _FakeDeadLetter()
 
     stats = backfill._process_mapping(
@@ -279,6 +317,7 @@ def test_process_mapping_filters_records_by_client_hash_shard() -> None:
         writer=writer,
         watermarks=watermarks,
         dead_letter=dead_letter,
+        metrics=None,
         cursor_store=None,
         incremental=False,
         since_ts=None,
@@ -340,7 +379,7 @@ def test_process_mapping_persists_cursor_only_after_successful_writes() -> None:
         ]
     )
     writer = _FakeWriter(fail_ids={"u2"})
-    watermarks = _FakeWatermarks(initial=5)
+    watermarks = _FakeWatermarks(initial={"v1:users->Users": 5})
     dead_letter = _FakeDeadLetter()
     cursor_store = _FakeCursorStore()
 
@@ -363,6 +402,7 @@ def test_process_mapping_persists_cursor_only_after_successful_writes() -> None:
         writer=writer,
         watermarks=watermarks,
         dead_letter=dead_letter,
+        metrics=None,
         cursor_store=cursor_store,
         incremental=True,
         since_ts=None,
@@ -379,7 +419,7 @@ def test_process_mapping_clears_cursor_after_successful_full_run() -> None:
     mapping = config.mappings[0]
     reader = _FakeReader([{"id": "u1", "email": "u1@example.com", "_ts": 10}])
     writer = _FakeWriter()
-    watermarks = _FakeWatermarks(initial=0)
+    watermarks = _FakeWatermarks()
     dead_letter = _FakeDeadLetter()
     cursor_store = _FakeCursorStore()
 
@@ -402,6 +442,7 @@ def test_process_mapping_clears_cursor_after_successful_full_run() -> None:
         writer=writer,
         watermarks=watermarks,
         dead_letter=dead_letter,
+        metrics=None,
         cursor_store=cursor_store,
         incremental=False,
         since_ts=None,

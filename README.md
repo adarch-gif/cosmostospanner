@@ -11,6 +11,7 @@ This project provides a configurable migration framework for:
 7. Shard-aware execution for large mappings and jobs, including per-shard checkpoints and shared lease coordination.
 8. Exact routed validation for v2 across source, route registry, Firestore, and Spanner.
 9. Persisted reader cursors so source scans can resume across process restarts at the last safe boundary.
+10. Structured JSON logging and Prometheus/JSON metrics snapshots for long-running migration workers.
 
 It now includes a separate **v2 multi-API router** for Cosmos MongoDB API and Cassandra API:
 
@@ -95,6 +96,7 @@ All mapping behavior is YAML-driven.
 - Execute full backfill for each mapping (container -> table).
 - Tune `batch_size` and `query_page_size` using observed throughput and commit latency.
 - Capture baseline metrics: docs/sec, rows/sec, retry rates, and failure counts.
+- Configure `runtime.metrics_file_path` when you want a Prometheus textfile or JSON snapshot for external scraping/alerting.
 - Run `scripts/validate.py` and resolve mismatches.
 
 ### Phase 3: Incremental catch-up
@@ -175,6 +177,7 @@ python .\scripts\validate.py --config .\config\migration.yaml --reconciliation-m
 8. Run tests.
 
 ```powershell
+python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
@@ -239,6 +242,8 @@ See `docs/05_TERRAFORM_IAC_GUIDE.md` for full parameter/flow details.
 - `incremental_query`: defaults to `_ts > @last_ts` if omitted.
 - `validation_columns`: optional explicit column list for value-level validation.
 - `watermark_state_file`, `state_file`, `route_registry_file`: can be local paths, `gs://bucket/object` paths, or `spanner://<project>/<instance>/<database>/<table>?namespace=<name>` control-plane locations.
+- `log_format`: choose plain text or structured JSON logs for centralized collectors.
+- `metrics_file_path`, `metrics_format`: optional runtime metrics snapshots for Prometheus textfile collectors or JSON-based monitors.
 - `reader_cursor_state_file`: optional persisted source cursor state for crash/restart-aware reader resume; supports local paths, `gs://`, and `spanner://<project>/<instance>/<database>/<table>?namespace=<name>`.
 - `lease_file`: optional shared lease state for multi-runner coordination; supports local paths, `gs://`, and `spanner://...` control-plane tables.
 - `progress_file`, `run_id`: optional run-scoped shard progress tracking for distributed full runs; use a unique `run_id` per migration campaign. For transactional shard claims, point `progress_file` and `lease_file` at the same Spanner control-plane table with different namespaces.
@@ -270,6 +275,7 @@ See `docs/05_TERRAFORM_IAC_GUIDE.md` for full parameter/flow details.
 - For enforced stage rehearsal before prod, use [scripts/release_gate.py](C:/Users/ados1/cosmos-to-spanner-migration/scripts/release_gate.py) and the runtime `release_gate_*` settings described in [11_RELEASE_GATE_AND_STAGE_REHEARSAL.md](C:/Users/ados1/cosmos-to-spanner-migration/docs/11_RELEASE_GATE_AND_STAGE_REHEARSAL.md).
 - `client_hash` sharding improves ownership isolation but can still duplicate source scans across workers; prefer `query_template` sharding for very large datasets.
 - Cosmos SQL source reads resume by continuation token after transient page failures.
+- V1 incremental watermarks are keyed by mapping (`source_container -> target_table`) and shard, which prevents checkpoint collisions across multiple mappings over the same source container.
 - Mongo and Cassandra source reads reopen from the last emitted position and skip already-emitted records; this is safest when the source query order is stable.
 - If `reader_cursor_state_file` is configured, the runtime persists the last safe source boundary after successful flushes so later process restarts can resume more precisely.
 - Full checksum reconciliation is exact and bounded-memory, but it uses local temporary disk while comparing very large datasets.

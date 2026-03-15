@@ -4,6 +4,7 @@ runtime:
   batch_size: 200
   dry_run: false
   log_level: "INFO"
+  log_format: "text" # text | json
   error_mode: "fail" # fail | skip
   state_file: "state/v2_watermarks.json" # or gs://<bucket>/state/v2_watermarks.json or spanner://<project>/<instance>/<database>/MigrationControlPlane?namespace=v2-watermarks
   route_registry_file: "state/v2_route_registry.json" # or gs://<bucket>/state/v2_route_registry.json or spanner://<project>/<instance>/<database>/MigrationControlPlane?namespace=v2-route-registry
@@ -19,6 +20,8 @@ runtime:
   lease_duration_seconds: 120
   heartbeat_interval_seconds: 30
   dlq_file_path: "state/v2_dead_letter.jsonl"
+  metrics_file_path: "" # optional local file path for runtime metrics snapshots, for example state/v2-metrics.prom
+  metrics_format: "prometheus" # prometheus | json
   flush_state_each_batch: true
   retry_attempts: 5
   # retry_* also applies to reader-side resume after transient source stream failures

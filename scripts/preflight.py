@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
 
 from migration.config import MigrationConfig, TableMapping, load_config
 from migration.cosmos_reader import CosmosReader
-from migration.logging_utils import configure_logging
+from migration.logging_utils import build_log_context, configure_logging
 from migration.retry_utils import RetryPolicy
 from migration.spanner_writer import SpannerWriter
 
@@ -73,7 +73,16 @@ def _check_source_access(reader: CosmosReader, mapping: TableMapping) -> tuple[b
 def main() -> int:
     args = parse_args()
     config = load_config(args.config)
-    configure_logging(config.runtime.log_level)
+    configure_logging(
+        config.runtime.log_level,
+        config.runtime.log_format,
+        static_fields=build_log_context(
+            pipeline="v1-preflight",
+            deployment_environment=config.runtime.deployment_environment,
+            run_id=config.runtime.run_id,
+            worker_id=config.runtime.worker_id,
+        ),
+    )
     retry_policy = RetryPolicy.from_runtime(config.runtime)
 
     mappings = _selected_mappings(config, args.containers)

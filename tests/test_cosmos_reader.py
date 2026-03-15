@@ -179,3 +179,58 @@ def test_iter_documents_reuses_persisted_page_start_token_and_skips_within_page(
     )
 
     assert [doc["id"] for doc in docs] == ["3"]
+
+
+def test_iter_documents_capped_runs_resume_without_skipping_records(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("migration.cosmos_reader.CosmosClient", _FakeCosmosClient)
+
+    reader = CosmosReader(
+        CosmosConfig(
+            endpoint="https://example.documents.azure.com:443/",
+            key="key",
+            database="db",
+        ),
+        retry_policy=RetryPolicy(
+            attempts=3,
+            initial_delay_seconds=0.0,
+            max_delay_seconds=0.0,
+            backoff_multiplier=1.0,
+            jitter_seconds=0.0,
+        ),
+    )
+    resume_state = StreamResumeState()
+
+    first = list(
+        reader.iter_documents(
+            container_name="users",
+            query="SELECT * FROM c",
+            page_size=2,
+            max_docs=1,
+            resume_state=resume_state,
+        )
+    )
+    second = list(
+        reader.iter_documents(
+            container_name="users",
+            query="SELECT * FROM c",
+            page_size=2,
+            max_docs=1,
+            resume_state=resume_state,
+        )
+    )
+    third = list(
+        reader.iter_documents(
+            container_name="users",
+            query="SELECT * FROM c",
+            page_size=2,
+            max_docs=1,
+            resume_state=resume_state,
+        )
+    )
+
+    assert [doc["id"] for doc in first] == ["1"]
+    assert [doc["id"] for doc in second] == ["2"]
+    assert [doc["id"] for doc in third] == ["3"]
+    assert resume_state.last_source_key == "3"

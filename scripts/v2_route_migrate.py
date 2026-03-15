@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from migration.logging_utils import configure_logging
+from migration.logging_utils import build_log_context, configure_logging
 from migration.release_gate import (
     enforce_stage_rehearsal_or_raise,
     logical_fingerprint_v2,
@@ -57,7 +57,17 @@ def main() -> int:
     if args.dry_run:
         config.runtime.dry_run = True
 
-    configure_logging(config.runtime.log_level)
+    log_context = build_log_context(
+        pipeline="v2",
+        deployment_environment=config.runtime.deployment_environment,
+        run_id=config.runtime.run_id,
+        worker_id=config.runtime.worker_id,
+    )
+    configure_logging(
+        config.runtime.log_level,
+        config.runtime.log_format,
+        static_fields=log_context,
+    )
     selected_jobs = [
         job
         for job in config.jobs

@@ -14,6 +14,7 @@ runtime:
   query_page_size: 200
   dry_run: false
   log_level: "INFO"
+  log_format: "text" # text | json
   watermark_state_file: "state/watermarks.json" # or gs://<bucket>/state/watermarks.json or spanner://<project>/<instance>/<database>/MigrationControlPlane?namespace=v1-watermarks
   reader_cursor_state_file: "" # optional; use gs://<bucket>/state/v1-reader-cursors.json or spanner://<project>/<instance>/<database>/MigrationControlPlane?namespace=v1-reader-cursors
   lease_file: "" # optional; use gs://<bucket>/leases/v1.json or spanner://<project>/<instance>/<database>/MigrationControlPlane?namespace=v1-leases
@@ -30,6 +31,8 @@ runtime:
   flush_watermark_each_mapping: true
   error_mode: "fail" # fail | skip
   dlq_file_path: "state/dead_letter.jsonl"
+  metrics_file_path: "" # optional local file path for runtime metrics snapshots, for example state/v1-metrics.prom
+  metrics_format: "prometheus" # prometheus | json
   retry_attempts: 5
   # retry_* also applies to mid-stream source reader resume after transient failures
   retry_initial_delay_seconds: 0.5

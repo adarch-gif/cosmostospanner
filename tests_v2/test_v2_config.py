@@ -20,6 +20,9 @@ def test_load_v2_config_parses_mongo_and_cassandra(monkeypatch, tmp_path) -> Non
         "runtime": {
             "mode": "incremental",
             "batch_size": 100,
+            "log_format": "json",
+            "metrics_file_path": "state/v2-metrics.prom",
+            "metrics_format": "json",
             "lease_file": "gs://bucket/v2-leases.json",
             "reader_cursor_state_file": "gs://bucket/v2-reader-cursors.json",
             "worker_id": "worker-1",
@@ -67,6 +70,9 @@ def test_load_v2_config_parses_mongo_and_cassandra(monkeypatch, tmp_path) -> Non
 
     cfg = load_v2_config(_write_config(tmp_path, data))
     assert cfg.runtime.mode == "incremental"
+    assert cfg.runtime.log_format == "json"
+    assert cfg.runtime.metrics_file_path == "state/v2-metrics.prom"
+    assert cfg.runtime.metrics_format == "json"
     assert cfg.runtime.lease_file == "gs://bucket/v2-leases.json"
     assert cfg.runtime.reader_cursor_state_file == "gs://bucket/v2-reader-cursors.json"
     assert cfg.runtime.worker_id == "worker-1"
@@ -175,6 +181,44 @@ def test_load_v2_config_rejects_invalid_lease_timing(monkeypatch, tmp_path) -> N
         ],
     }
     with pytest.raises(ValueError, match="heartbeat_interval_seconds"):
+        load_v2_config(_write_config(tmp_path, data))
+
+
+def test_load_v2_config_rejects_invalid_log_and_metrics_formats(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COSMOS_MONGO_CONNECTION_STRING", "mongodb://example")
+    data = {
+        "runtime": {
+            "mode": "full",
+            "log_format": "pretty",
+        },
+        "routing": {"firestore_lt_bytes": 1_048_576},
+        "targets": {
+            "firestore": {"project": "proj"},
+            "spanner": {
+                "project": "proj",
+                "instance": "inst",
+                "database": "db",
+                "table": "RoutedDocuments",
+            },
+        },
+        "jobs": [
+            {
+                "name": "mongo_users",
+                "api": "mongodb",
+                "connection_string_env": "COSMOS_MONGO_CONNECTION_STRING",
+                "database": "appdb",
+                "collection": "users",
+                "route_namespace": "mongodb.appdb.users",
+                "key_fields": ["id"],
+            }
+        ],
+    }
+    with pytest.raises(ValueError, match="runtime.log_format"):
+        load_v2_config(_write_config(tmp_path, data))
+
+    data["runtime"]["log_format"] = "json"
+    data["runtime"]["metrics_format"] = "statsd"
+    with pytest.raises(ValueError, match="runtime.metrics_format"):
         load_v2_config(_write_config(tmp_path, data))
 
 

@@ -34,11 +34,14 @@ Validation rule:
 - `query_page_size` (default `200`, must be `> 0`): max documents returned per Cosmos page.
 - `dry_run` (default `false`): if true, no Spanner writes are executed.
 - `log_level` (default `INFO`): `DEBUG`, `INFO`, `WARNING`, `ERROR`.
-- `watermark_state_file` (default `state/watermarks.json`): watermark JSON path. Supports local files and `gs://bucket/object`.
+- `log_format` (default `text`): `text` or structured `json`.
+- `watermark_state_file` (default `state/watermarks.json`): watermark JSON path. Supports local files, `gs://bucket/object`, and `spanner://...` control-plane paths.
 - `watermark_overlap_seconds` (default `5`, must be `>= 0`): overlap window for incremental reads.
 - `flush_watermark_each_mapping` (default `true`): flush watermark file after each mapping in incremental mode.
 - `error_mode` (default `fail`): `fail` or `skip`.
 - `dlq_file_path` (default `state/dead_letter.jsonl`): dead-letter JSONL output path.
+- `metrics_file_path` (optional): local file path for runtime metrics snapshots written by migration runners.
+- `metrics_format` (default `prometheus`): `prometheus` textfile output or `json`.
 - `retry_attempts` (default `5`, must be `>= 1`): max retry attempts for retriable I/O operations.
 - `retry_initial_delay_seconds` (default `0.5`, must be `>= 0`): first retry delay.
 - `retry_max_delay_seconds` (default `15.0`, must be `>= 0`): max delay cap.
@@ -49,7 +52,7 @@ Validation rule:
 
 ## `mappings[]`
 
-Each mapping defines one Cosmos container to one Spanner table migration.
+Each mapping defines one Cosmos container to one Spanner table migration. Incremental watermarks are tracked per `source_container -> target_table` mapping (and per shard when sharding is enabled), so separate mappings over the same container do not collide.
 
 - `source_container` (required): Cosmos container name.
 - `target_table` (required): Spanner table name.

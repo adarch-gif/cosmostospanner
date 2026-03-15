@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from time import monotonic
 from typing import Any, Iterable
 
 from migration.dead_letter import DeadLetterSink
+from migration.logging_utils import build_log_context
+from migration.metrics import MetricsCollector
 from migration.coordination import WorkCoordinator
 from migration.resume import ReaderCursorStore, StreamResumeState
 from migration.retry_utils import RetryPolicy
@@ -57,6 +60,16 @@ class V2MigrationPipeline:
         self.watermarks = WatermarkStore(config.runtime.state_file)
         self.registry = RouteRegistryStore(config.runtime.route_registry_file)
         self.dead_letter = DeadLetterSink(config.runtime.dlq_file_path)
+        self.metrics = MetricsCollector(
+            config.runtime.metrics_file_path,
+            output_format=config.runtime.metrics_format,
+            static_labels=build_log_context(
+                pipeline="v2",
+                deployment_environment=config.runtime.deployment_environment,
+                run_id=config.runtime.run_id,
+                worker_id=config.runtime.worker_id,
+            ),
+        )
         self.reader_cursors = (
             ReaderCursorStore(config.runtime.reader_cursor_state_file)
             if config.runtime.reader_cursor_state_file
@@ -260,6 +273,121 @@ class V2MigrationPipeline:
                 work_context[work_key] = (job, shard_index, max_records)
         return work_items, work_context, all_stats
 
+    def _job_metric_labels(
+        self,
+        job: MongoJobConfig | CassandraJobConfig,
+        *,
+        shard_index: int | None = None,
+    ) -> dict[str, str]:
+        labels = {
+            "job_name": job.name,
+            "api": job.api,
+            "mode": self.config.runtime.mode,
+        }
+        if shard_index is not None and job.shard_count > 1:
+            labels["shard"] = str(shard_index)
+        return labels
+
+    def _publish_job_metrics(
+        self,
+        job: MongoJobConfig | CassandraJobConfig,
+        stats: JobStats,
+        *,
+        shard_index: int | None = None,
+        duration_seconds: float | None = None,
+    ) -> None:
+        metrics = getattr(self, "metrics", None)
+        if metrics is None or not metrics.enabled:
+            return
+
+        labels = self._job_metric_labels(job, shard_index=shard_index)
+        metrics.gauge(
+            "migration_v2_docs_seen",
+            stats.docs_seen,
+            labels=labels,
+            description="Current number of source records seen for the v2 job.",
+        )
+        metrics.gauge(
+            "migration_v2_firestore_writes",
+            stats.firestore_writes,
+            labels=labels,
+            description="Current number of Firestore writes for the v2 job.",
+        )
+        metrics.gauge(
+            "migration_v2_spanner_writes",
+            stats.spanner_writes,
+            labels=labels,
+            description="Current number of Spanner writes for the v2 job.",
+        )
+        metrics.gauge(
+            "migration_v2_moved_records",
+            stats.moved_records,
+            labels=labels,
+            description="Current number of routed records moved across sinks for the v2 job.",
+        )
+        metrics.gauge(
+            "migration_v2_checkpoint_skipped",
+            stats.checkpoint_skipped,
+            labels=labels,
+            description="Current number of records skipped by checkpoint replay handling.",
+        )
+        metrics.gauge(
+            "migration_v2_unchanged_skipped",
+            stats.unchanged_skipped,
+            labels=labels,
+            description="Current number of unchanged routed records skipped for the v2 job.",
+        )
+        metrics.gauge(
+            "migration_v2_rejected_records",
+            stats.rejected_records,
+            labels=labels,
+            description="Current number of rejected routed records for the v2 job.",
+        )
+        metrics.gauge(
+            "migration_v2_failed_records",
+            stats.failed_records,
+            labels=labels,
+            description="Current number of failed routed records for the v2 job.",
+        )
+        metrics.gauge(
+            "migration_v2_cleanup_failed",
+            stats.cleanup_failed,
+            labels=labels,
+            description="Current number of cleanup failures for moved routed records.",
+        )
+        metrics.gauge(
+            "migration_v2_lease_conflicts",
+            stats.lease_conflicts,
+            labels=labels,
+            description="Current number of lease conflicts observed by the v2 job.",
+        )
+        metrics.gauge(
+            "migration_v2_progress_skips",
+            stats.progress_skips,
+            labels=labels,
+            description="Current number of completed shards skipped by progress tracking.",
+        )
+        metrics.gauge(
+            "migration_v2_out_of_order_records",
+            stats.out_of_order_records,
+            labels=labels,
+            description="Current number of out-of-order incremental records observed for the v2 job.",
+        )
+        metrics.gauge(
+            "migration_v2_max_watermark",
+            0 if stats.max_watermark is None else stats.max_watermark,
+            labels=labels,
+            description="Highest watermark observed or committed for the v2 job.",
+        )
+        if duration_seconds is not None:
+            metrics.gauge(
+                "migration_v2_job_duration_seconds",
+                duration_seconds,
+                labels=labels,
+                description="Elapsed runtime for the current v2 job execution.",
+            )
+        metrics.flush()
+
     def _log_job_summary(self, job: MongoJobConfig | CassandraJobConfig, stats: JobStats) -> None:
         LOGGER.info(
             "Completed v2 job %s | seen=%s firestore=%s spanner=%s moved=%s unchanged=%s checkpoint_skipped=%s rejected=%s failed=%s cleanup_failed=%s lease_conflicts=%s progress_skips=%s out_of_order=%s watermark=%s",
@@ -278,6 +406,7 @@ class V2MigrationPipeline:
             stats.out_of_order_records,
             stats.max_watermark,
         )
+        self._publish_job_metrics(job, stats)
 
     def _run_full_progress_shard(
         self,
@@ -289,6 +418,7 @@ class V2MigrationPipeline:
         stats: JobStats,
         coordinator: WorkCoordinator,
     ) -> None:
+        started_at = monotonic()
         reader_cursors = getattr(self, "reader_cursors", None)
         source_resume_state = (
             reader_cursors.get(work_key) if reader_cursors else None
@@ -356,6 +486,7 @@ class V2MigrationPipeline:
                     self.registry.flush()
                     if not cursor_blocked:
                         self._persist_reader_cursor(work_key, safe_resume_state)
+                    self._publish_job_metrics(job, stats, shard_index=shard_index)
             shard_failed = stats.failed_records - shard_start_failed
             shard_rejected = stats.rejected_records - shard_start_rejected
             shard_cleanup_failed = stats.cleanup_failed - shard_start_cleanup_failed
@@ -402,6 +533,12 @@ class V2MigrationPipeline:
                 and shard_out_of_order == 0
             ):
                 self._clear_reader_cursor(work_key)
+            self._publish_job_metrics(
+                job,
+                stats,
+                shard_index=shard_index,
+                duration_seconds=monotonic() - started_at,
+            )
         except Exception as exc:
             coordinator.mark_failed(
                 work_key,
@@ -750,6 +887,7 @@ class V2MigrationPipeline:
                 shard_start_rejected = stats.rejected_records
                 shard_start_cleanup_failed = stats.cleanup_failed
                 shard_start_out_of_order = stats.out_of_order_records
+                started_at = monotonic()
                 checkpoint_blocked = False
                 cursor_blocked = False
                 last_seen_watermark = stored_checkpoint.watermark
@@ -820,6 +958,7 @@ class V2MigrationPipeline:
                             self.registry.flush()
                             if not cursor_blocked:
                                 self._persist_reader_cursor(work_key, safe_resume_state)
+                            self._publish_job_metrics(job, stats, shard_index=shard_index)
                     if self.config.runtime.mode == "incremental":
                         if stats.out_of_order_records > 0:
                             checkpoint_blocked = True
@@ -899,6 +1038,12 @@ class V2MigrationPipeline:
                         and not checkpoint_blocked
                     ):
                         self._clear_reader_cursor(work_key)
+                    self._publish_job_metrics(
+                        job,
+                        stats,
+                        shard_index=shard_index,
+                        duration_seconds=monotonic() - started_at,
+                    )
                 except Exception as exc:
                     if coordinator and self.config.runtime.mode == "full":
                         coordinator.mark_failed(
