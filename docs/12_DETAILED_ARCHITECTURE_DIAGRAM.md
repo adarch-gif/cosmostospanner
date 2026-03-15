@@ -2,81 +2,81 @@
 
 This diagram is the authoritative high-level architecture view for the repository as it exists today.
 
-It separates:
+It keeps the layout simple by separating the system into four layers:
 
-1. `v1` SQL API -> Spanner migration
-2. `v2` Mongo/Cassandra -> Firestore/Spanner routed migration
-3. shared control-plane backends for distributed execution and restart safety
-4. provisioning and release-gate support
+1. source systems
+2. execution entry points
+3. runtime pipelines
+4. state and target systems
 
 ```mermaid
-flowchart TB
-    subgraph Azure["Azure Source Environment"]
-        SQL["Cosmos DB<br/>SQL API"]
-        Mongo["Cosmos DB<br/>Mongo API"]
-        Cassandra["Cosmos DB<br/>Cassandra API"]
+flowchart LR
+    subgraph Sources["1. Source Systems"]
+        SQL["Cosmos SQL API"]
+        Mongo["Cosmos Mongo API"]
+        Cassandra["Cosmos Cassandra API"]
     end
 
-    subgraph Entry["Execution / Entry Points"]
-        V1Pre["scripts/preflight.py"]
-        V1Run["scripts/backfill.py"]
-        V1Val["scripts/validate.py"]
-        V2Pre["scripts/v2_preflight.py"]
-        V2Run["scripts/v2_route_migrate.py"]
-        V2Val["scripts/v2_validate.py"]
-        Release["scripts/release_gate.py"]
-        Status["scripts/control_plane_status.py"]
+    subgraph Entry["2. Execution Entry Points"]
+        V1Pre["v1 preflight"]
+        V1Run["v1 backfill / incremental"]
+        V1Val["v1 validation"]
+        V2Pre["v2 preflight"]
+        V2Run["v2 routed migration"]
+        V2Val["v2 routed validation"]
+        Release["release gate"]
+        Status["control-plane status"]
     end
 
-    subgraph V1["v1 Pipeline: Cosmos SQL API -> Spanner"]
-        V1Cfg["load_config()<br/>migration/config.py"]
-        V1Reader["CosmosReader"]
-        V1Transform["transform_document()"]
-        V1Writer["SpannerWriter"]
-        V1DLQ["DeadLetterSink"]
-        V1WM["WatermarkStore<br/>(mapping + shard scoped)"]
-        V1Cursor["ReaderCursorStore"]
-        V1Coord["WorkCoordinator<br/>lease + progress"]
-        V1Obs["Structured logs<br/>MetricsCollector"]
+    subgraph Pipelines["3. Runtime Pipelines"]
+        direction TB
+
+        subgraph V1["v1: Cosmos SQL API -> Spanner"]
+            direction LR
+            V1Cfg["config loader"]
+            V1Read["CosmosReader"]
+            V1Map["transform_document"]
+            V1Write["SpannerWriter"]
+            V1Err["DeadLetterSink"]
+            V1Obs["structured logs + metrics"]
+        end
+
+        subgraph V2["v2: Mongo/Cassandra -> Routed Sinks"]
+            direction LR
+            V2Cfg["config loader"]
+            V2Read["source adapters"]
+            V2Route["SizeRouter"]
+            V2Fire["Firestore sink"]
+            V2Span["Spanner sink"]
+            V2Reg["RouteRegistryStore"]
+            V2Err["DeadLetterSink"]
+            V2Obs["structured logs + metrics"]
+            V2Recon["V2 reconciliation"]
+        end
     end
 
-    subgraph V2["v2 Pipeline: Mongo/Cassandra -> Routed Sinks"]
-        V2Cfg["load_v2_config()<br/>migration_v2/config.py"]
-        MongoAdapter["MongoCosmosSourceAdapter"]
-        CassAdapter["CassandraCosmosSourceAdapter"]
-        Router["SizeRouter<br/>payload bytes + overhead"]
-        FireSink["FirestoreSinkAdapter"]
-        SpanSink["SpannerSinkAdapter"]
-        Registry["RouteRegistryStore<br/>destination + checksum + sync_state"]
-        V2WM["WatermarkStore<br/>(inclusive replay checkpoint)"]
-        V2Cursor["ReaderCursorStore"]
-        V2Coord["WorkCoordinator<br/>lease + progress"]
-        V2Recon["V2ReconciliationRunner"]
-        V2DLQ["DeadLetterSink"]
-        V2Obs["Structured logs<br/>MetricsCollector"]
+    subgraph State["4. Shared State / Control Plane"]
+        direction TB
+        StateKinds["watermarks<br/>reader cursors<br/>leases<br/>progress manifests<br/>route registry"]
+        Backends["local JSON<br/>GCS objects<br/>Spanner control-plane table"]
     end
 
-    subgraph Control["State / Control Plane Backends"]
-        Local["Local JSON files"]
-        GCS["GCS objects"]
-        CPSpanner["Spanner control-plane table"]
-    end
-
-    subgraph GCP["GCP Targets / Outputs"]
+    subgraph Targets["5. Targets / Outputs"]
+        direction TB
         Spanner["Cloud Spanner"]
         Firestore["Firestore"]
-        DLQFile["JSONL DLQ files"]
-        MetricsOut["Prometheus / JSON metrics snapshots"]
+        DLQ["JSONL dead-letter output"]
+        Metrics["Prometheus / JSON metrics files"]
     end
 
-    subgraph Infra["Provisioning / Safety Controls"]
-        TF["Terraform stacks + env wrappers"]
-        Gate["Stage rehearsal attestation"]
+    subgraph Infra["6. Provisioning / Safety"]
+        Terraform["Terraform stacks"]
+        Stage["stage rehearsal attestation"]
     end
 
-    SQL --> V1Reader
-    Mongo --> MongoAdapter
-    Cassandra --> CassAdapter
+    SQL --> V1Read
+    Mongo --> V2Read
+    Cassandra --> V2Read
 
     V1Pre --> V1Cfg
     V1Run --> V1Cfg
@@ -86,70 +86,33 @@ flowchart TB
     V2Run --> V2Cfg
     V2Val --> V2Cfg
 
-    Release --> Gate
-    Status --> V1Coord
-    Status --> V2Coord
+    Release --> Stage
+    Status --> StateKinds
 
-    V1Cfg --> V1Reader
-    V1Reader --> V1Transform
-    V1Transform --> V1Writer
-    V1Writer --> Spanner
-    V1Transform -->|transform / delete failures| V1DLQ
-    V1Writer -->|row fallback failures| V1DLQ
-    V1DLQ --> DLQFile
-    V1Cfg --> V1WM
-    V1Cfg --> V1Cursor
-    V1Cfg --> V1Coord
-    V1Run --> V1Obs --> MetricsOut
+    V1Cfg --> V1Read --> V1Map --> V1Write --> Spanner
+    V1Map -->|transform or delete errors| V1Err --> DLQ
+    V1Write -->|row fallback failures| V1Err
+    V1Run --> V1Obs --> Metrics
 
-    V2Cfg --> MongoAdapter
-    V2Cfg --> CassAdapter
-    MongoAdapter --> Router
-    CassAdapter --> Router
-    Router -->|payload < threshold| FireSink
-    Router -->|threshold <= payload <= safe cap| SpanSink
-    Router -->|oversized / rejected| V2DLQ
-    FireSink --> Firestore
-    SpanSink --> Spanner
-    V2DLQ --> DLQFile
-    FireSink --> Registry
-    SpanSink --> Registry
-    V2Cfg --> V2WM
-    V2Cfg --> V2Cursor
-    V2Cfg --> V2Coord
-    V2Run --> V2Obs --> MetricsOut
+    V2Cfg --> V2Read --> V2Route
+    V2Route -->|small payload| V2Fire --> Firestore
+    V2Route -->|large payload within safe cap| V2Span --> Spanner
+    V2Route -->|oversized / rejected| V2Err --> DLQ
+    V2Fire --> V2Reg
+    V2Span --> V2Reg
+    V2Run --> V2Obs --> Metrics
     V2Val --> V2Recon
-    V2Recon --> Registry
+    V2Recon --> V2Reg
     V2Recon --> Firestore
     V2Recon --> Spanner
 
-    V1WM --- Local
-    V1WM --- GCS
-    V1WM --- CPSpanner
-    V1Cursor --- Local
-    V1Cursor --- GCS
-    V1Cursor --- CPSpanner
-    V1Coord --- Local
-    V1Coord --- GCS
-    V1Coord --- CPSpanner
+    V1Run --> StateKinds
+    V2Run --> StateKinds
+    StateKinds --> Backends
 
-    Registry --- Local
-    Registry --- GCS
-    Registry --- CPSpanner
-    V2WM --- Local
-    V2WM --- GCS
-    V2WM --- CPSpanner
-    V2Cursor --- Local
-    V2Cursor --- GCS
-    V2Cursor --- CPSpanner
-    V2Coord --- Local
-    V2Coord --- GCS
-    V2Coord --- CPSpanner
-
-    TF --> Spanner
-    TF --> Firestore
-    TF --> GCS
-    TF --> CPSpanner
+    Terraform --> Spanner
+    Terraform --> Firestore
+    Terraform --> Backends
 ```
 
 ## Notes

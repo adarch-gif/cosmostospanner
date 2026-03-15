@@ -1,109 +1,71 @@
 # 13 - Detailed Data Flow Diagram
 
-This sequence diagram captures the runtime behavior that matters most for correctness:
+This diagram focuses on runtime correctness, not every implementation detail.
+
+It shows the five decisions that matter operationally:
 
 1. release gating
-2. distributed lease / shard handling
-3. restart-safe reader cursors
-4. success-aware checkpoint advancement
-5. v2 route-registry move semantics
+2. distributed shard ownership
+3. safe source resume
+4. write / route / cleanup behavior
+5. checkpoint advancement rules
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    actor Scheduler as Operator / Scheduler
-    participant Runner as Migration Runner
-    participant Gate as Release Gate
-    participant Lease as Lease / Progress Store
-    participant Cursor as Reader Cursor Store
-    participant Checkpoint as Watermark Store
-    participant Source as Cosmos Source API
-    participant Transform as Transform / Canonicalize
-    participant Router as SizeRouter
-    participant Sink as Spanner / Firestore Sink
-    participant Registry as Route Registry
-    participant DLQ as Dead Letter Sink
-    participant Obs as Logs / Metrics
+flowchart TD
+    Start["Start run"] --> Gate{"Prod release gate enabled?"}
+    Gate -- Yes --> GateCheck["Validate fresh stage rehearsal"]
+    Gate -- No --> Claim
+    GateCheck --> Claim["Claim shard / acquire lease if distributed"]
 
-    Scheduler->>Runner: start run(config, mode, filters)
-    opt prod gating enabled
-        Runner->>Gate: validate fresh stage rehearsal
-        Gate-->>Runner: allowed or blocked
-    end
+    Claim --> Resume["Load reader cursor + committed checkpoint"]
+    Resume --> Read["Read source page / record"]
+    Read --> Transform["Transform document or canonicalize record"]
 
-    opt distributed execution
-        Runner->>Lease: acquire lease / claim shard work item
-        Lease-->>Runner: granted or skip
-    end
+    Transform --> Pipeline{"Pipeline?"}
 
-    Runner->>Cursor: load last safe reader position
-    Cursor-->>Runner: resume token / last emitted key
-    Runner->>Checkpoint: load last committed checkpoint
-    Checkpoint-->>Runner: watermark or watermark + route-key boundary
-    Note over Runner,Checkpoint: v1 uses mapping+shard checkpoints. v2 uses inclusive replay with route-key dedup at watermark boundaries.
+    Pipeline -- v1 --> V1Write["Write Spanner batch<br/>upsert or delete"]
+    V1Write --> V1Ok{"Batch succeeded?"}
+    V1Ok -- Yes --> SafeCursor["Persist last safe reader cursor"]
+    V1Ok -- No, skip mode --> V1DLQ["Emit dead-letter entry"]
+    V1Ok -- No, fail mode --> Fail["Fail shard / run"]
 
-    loop each source page or canonical record
-        Runner->>Source: read next page / record
-        Source-->>Runner: document + watermark + cursor
-        Runner->>Transform: map fields or build canonical record
+    Pipeline -- v2 --> Route["Route by payload size + overhead"]
+    Route --> RouteType{"Destination?"}
+    RouteType -- Firestore --> FireWrite["Upsert Firestore"]
+    RouteType -- Spanner --> SpanWrite["Upsert Spanner"]
+    RouteType -- Reject --> V2DLQ["Emit rejected record to DLQ"]
 
-        alt v1 pipeline
-            Transform-->>Runner: row or delete operation
-            Runner->>Sink: batch upsert/delete in Spanner
-            alt batch success
-                Sink-->>Runner: committed
-                Runner->>Cursor: persist last safe source boundary
-            else failure and error_mode=skip
-                Sink-->>Runner: write error
-                Runner->>DLQ: emit failed row or document
-                Runner->>Obs: increment failure metrics
-            end
+    FireWrite --> RouteMove{"Destination changed?"}
+    SpanWrite --> RouteMove
+    RouteMove -- No --> RouteComplete["Upsert complete route-registry entry"]
+    RouteMove -- Yes --> Pending["Write pending_cleanup registry entry"]
+    Pending --> Cleanup["Delete old sink copy"]
+    Cleanup --> CleanupOk{"Cleanup succeeded?"}
+    CleanupOk -- Yes --> RouteComplete
+    CleanupOk -- No, skip mode --> CleanupDeferred["Keep pending_cleanup for retry"]
+    CleanupOk -- No, fail mode --> Fail
 
-        else v2 pipeline
-            Transform-->>Runner: canonical record
-            Runner->>Router: decide by payload bytes + overhead
+    RouteComplete --> SafeCursor
 
-            alt route = Firestore
-                Router-->>Runner: FIRESTORE
-                Runner->>Sink: upsert Firestore record
-            else route = Spanner
-                Router-->>Runner: SPANNER
-                Runner->>Sink: upsert Spanner record
-            else route = reject
-                Router-->>Runner: REJECT
-                Runner->>DLQ: emit rejected record
-                Runner->>Obs: increment rejected metrics
-            end
+    SafeCursor --> Flush{"Flush boundary reached?"}
+    V1DLQ --> Flush
+    V2DLQ --> Flush
+    CleanupDeferred --> Flush
+    Flush -- Yes --> FlushState["Flush registry / metrics / local state"]
+    Flush -- No --> More{"More source records?"}
+    FlushState --> More
 
-            alt destination changed
-                Runner->>Registry: write pending_cleanup entry
-                Runner->>Sink: delete old sink copy
-                Sink-->>Runner: cleanup success or failure
-            end
+    More -- Yes --> Read
+    More -- No --> Advance{"Were writes safe and ordering valid?"}
 
-            opt successful routed write
-                Runner->>Registry: upsert complete route entry
-                Runner->>Cursor: persist last safe source boundary
-            end
-        end
+    Advance -- Yes --> Commit["Advance checkpoint"]
+    Advance -- No --> Hold["Hold checkpoint for replay safety"]
 
-        opt batch flush boundary
-            Runner->>Registry: flush registry state (v2)
-            Runner->>Obs: flush metrics snapshot
-        end
-    end
-
-    alt no record failures and ordering is safe
-        Runner->>Checkpoint: advance committed checkpoint
-        Runner->>Cursor: clear cursor for completed shard
-    else failures or out-of-order incremental records
-        Runner->>Obs: log checkpoint blocked
-        Note over Runner,Checkpoint: Checkpoint is intentionally held back to preserve replay safety.
-    end
-
-    opt distributed full run
-        Runner->>Lease: mark shard completed or failed
-    end
+    Commit --> Clear["Clear reader cursor for completed shard"]
+    Hold --> Mark["Mark shard completed or failed"]
+    Clear --> Mark
+    Mark --> End["End run"]
+    Fail --> End
 ```
 
 ## Notes
